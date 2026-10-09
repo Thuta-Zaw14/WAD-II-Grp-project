@@ -46,7 +46,7 @@ async function submit() {
 <template>
   <div class="page">
     <header class="top text-center py-3 py-md-4">
-      <h1 class="h3 m-0">Skill Share</h1>
+      <h1 class="h3 m-0">Kongsi</h1>
     </header>
 
     <div class="row g-0" :class="{ 'flex-md-row-reverse': isSignup }">
