@@ -5,7 +5,9 @@ import {
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
 } from 'firebase/auth'
+
 import { useRouter } from 'vue-router'
+import { createProfile } from '../services/api'
 
 import loginImg from '../assets/login.jpg'
 import signupImg from '../assets/signup.jpg'
@@ -30,9 +32,11 @@ async function submit() {
   try {
     if (isSignup.value) {
       const result = await createUserWithEmailAndPassword(auth, email.value, password.value)
+      await createProfile()
       message.value = 'Account created for ' + result.user.email
     } else {
       const result = await signInWithEmailAndPassword(auth, email.value, password.value)
+      await createProfile()
       message.value = 'Logged in as ' + result.user.email
     }
     router.push('/home')
