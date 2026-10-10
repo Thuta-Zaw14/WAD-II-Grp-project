@@ -1,8 +1,3 @@
-<<<<<<< Updated upstream
-<template>
-<h1>Home</h1>
-</template>
-=======
 <script setup>
 import { ref, computed, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
@@ -36,7 +31,6 @@ const stopListening = onAuthStateChanged(auth, handleAuthChange)
 
 onUnmounted(stopListening)
 
-
 async function logout() {
   await signOut(auth)
 }
@@ -55,7 +49,6 @@ const skills = ref([
   { id: 5, skill: 'Photo editing', teacher: 'Jun W.', category: 'Creative' },
   { id: 6, skill: 'Basketball', teacher: 'Chris P.', category: 'Sports' },
 ])
-
 
 const filteredSkills = computed(() => {
   const text = search.value.toLowerCase()
@@ -139,4 +132,3 @@ const filteredSkills = computed(() => {
   color: white;
 }
 </style>
->>>>>>> Stashed changes
