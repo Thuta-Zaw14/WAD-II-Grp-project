@@ -39,6 +39,53 @@ function goToSessions() {
   router.push('/sessions')
 }
 
+// Booking popup
+const selectedSkill = ref(null)
+
+// Builds a fresh list each time, so every skill gets its own copy
+function makeSlots() {
+  return [
+    { id: 1, date: '2026-10-22', time: '10:00', booked: false },
+    { id: 2, date: '2026-10-22', time: '14:00', booked: true },
+    { id: 3, date: '2026-10-24', time: '09:00', booked: false },
+    { id: 4, date: '2026-10-25', time: '16:00', booked: false },
+  ]
+}
+
+// One list of slots per skill, created the first time its popup opens
+const slotsBySkill = ref({})
+
+// The slots for whichever popup is open
+const currentSlots = computed(() => {
+  if (!selectedSkill.value) return []
+  return slotsBySkill.value[selectedSkill.value.id] || []
+})
+
+function openBooking(skill) {
+  if (!slotsBySkill.value[skill.id]) {
+    slotsBySkill.value[skill.id] = makeSlots()
+  }
+  selectedSkill.value = skill
+}
+
+function closeBooking() {
+  selectedSkill.value = null
+}
+
+function book(slot) {
+  if (slot.booked) return
+  slot.booked = true
+}
+
+const slotsByDate = computed(() => {
+  const groups = {}
+  for (const slot of currentSlots.value) {
+    if (!groups[slot.date]) groups[slot.date] = []
+    groups[slot.date].push(slot)
+  }
+  return groups
+})
+
 // Fake data for now
 const search = ref('')
 const skills = ref([
@@ -103,13 +150,54 @@ const filteredSkills = computed(() => {
             <span class="badge text-bg-light mb-2">{{ s.category }}</span>
             <h2 class="h5">{{ s.skill }}</h2>
             <p class="text-muted mb-3">Taught by {{ s.teacher }}</p>
-            <button class="btn btn-brand w-100">Request session</button>
+            <button class="btn btn-brand w-100" @click="openBooking(s)">Request session</button>
           </div>
         </div>
       </div>
     </div>
 
     <p v-if="filteredSkills.length === 0" class="text-muted">No skills match your search.</p>
+  </div>
+  
+    <div
+    v-if="selectedSkill"
+    class="modal d-block"
+    style="background: rgba(0, 0, 0, 0.5)"
+    @click.self="closeBooking"
+  >
+    <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable">
+      <div class="modal-content">
+        <div class="modal-header banner">
+          <div>
+            <h2 class="h5 mb-0">{{ selectedSkill.skill }}</h2>
+            <small>Coach: {{ selectedSkill.teacher }}</small>
+          </div>
+          <button class="btn-close" @click="closeBooking"></button>
+        </div>
+
+        <div class="modal-body">
+          <p class="text-muted">Pick a time that suits you.</p>
+
+          <div v-for="(daySlots, date) in slotsByDate" :key="date" class="mb-3">
+            <div class="fw-bold mb-2">{{ date }}</div>
+            <div class="d-flex flex-wrap gap-2">
+              <button
+                v-for="slot in daySlots"
+                :key="slot.id"
+                class="btn btn-sm"
+                :class="slot.booked ? 'btn-outline-secondary' : 'btn-brand'"
+                :disabled="slot.booked"
+                @click="book(slot)"
+              >
+                {{ slot.time }}
+              </button>
+            </div>
+          </div>
+
+          <p v-if="currentSlots.length === 0" class="text-muted">This coach has no available times yet.</p>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 

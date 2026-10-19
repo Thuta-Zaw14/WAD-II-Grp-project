@@ -34,6 +34,7 @@ function removeSession(id) {
 function goHome() {
   router.push('/home')
 }
+
 </script>
 
 <template>
