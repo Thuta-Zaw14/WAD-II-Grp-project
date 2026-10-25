@@ -224,6 +224,10 @@ function resetFilters() {
   selectedCategory.value = 'All'
   selectedRegion.value = 'All'
 }
+
+function goToInsights() {
+  router.push('/insights')
+}
 </script>
 
 <template>
@@ -231,6 +235,7 @@ function resetFilters() {
     <span class="navbar-brand fw-bold">Kongsi</span>
     <div class="d-flex align-items-center gap-3">
       <a href="#" class="text-decoration-none text-dark" @click.prevent="goToSessions">My sessions</a>
+      <a href="#" class="text-decoration-none text-dark" @click.prevent="goToInsights">Insights</a>
       <small v-if="user" class="text-muted d-none d-md-inline">{{ user.email }}</small>
       <button class="btn btn-sm" @click="logout">Log out</button>
     </div>
