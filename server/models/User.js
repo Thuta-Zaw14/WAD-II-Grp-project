@@ -10,7 +10,8 @@ const userSchema = new mongoose.Schema(
 
     email: {
       type: String,
-      required: true
+      required: true,
+      unique: true
     },
 
     name: String,
@@ -26,12 +27,14 @@ const userSchema = new mongoose.Schema(
 
     isAdmin: {
       type: Boolean,
-      default: false
+      default: false,
+      required : true
     },
 
     isBanned: {
       type: Boolean,
-      default: false
+      default: false,
+      required : true
     },
 
     numberOfReports: {
