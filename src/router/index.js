@@ -2,6 +2,8 @@ import { createRouter, createWebHistory } from 'vue-router'
 import LoginPage from '../view/LoginPage.vue'
 import HomePage from '../view/HomePage.vue'
 import SessionsPage from '../view/SessionsPage.vue'
+import AdminPage from '../view/AdminPage.vue'
+import AdminUserProfilePage from '../view/AdminUserProfilePage.vue'
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -10,6 +12,8 @@ const router = createRouter({
     { path: '/login', component: LoginPage },
     { path: '/home', component: HomePage },
     { path: '/sessions', component: SessionsPage },
+    { path: '/admin', component: AdminPage },
+    { path: '/admin/users/:uid', component: AdminUserProfilePage }
   ],
 })
 
