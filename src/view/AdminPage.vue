@@ -2,10 +2,16 @@
     import { ref, computed, onMounted } from "vue";
     import { useRouter } from 'vue-router'
     import axios from "axios";
+    import { onAuthStateChanged, signOut } from 'firebase/auth'
 
     const router = useRouter()
 
     const users = ref([])
+
+    // Sign out
+    async function logout() {
+        await signOut(auth)
+    }
 
     // Data from backend 
     async function loadUsers() {
@@ -54,7 +60,7 @@
             User Management
         </h1>
 
-        <button class="btn btn-danger btn-sm">
+        <button class="btn btn-danger btn-sm" @click="logout">
             Log out
         </button>
         </div>
