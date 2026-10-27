@@ -1,7 +1,7 @@
 <script setup>
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
-
+import { getSessions } from '../../server/models/Sessions'
 const router = useRouter()
 
 // Fake data for now
@@ -18,6 +18,7 @@ function toggleStatus(s) {
   s.status = 'Pending'
 }
 }
+
 
 function removeSession(id) {
     const updatedSessions = []
@@ -40,7 +41,7 @@ function goHome() {
 <template>
   <nav class="navbar border-bottom px-3">
     <span class="navbar-brand fw-bold">Kongsi</span>
-    <span class="text-dark" role="button" @click="goHome">Back to home</span>
+    <span class="text-dark" role="button" @click="getSessions">Back to home</span>
   </nav>
 
   <div class="container py-4">
