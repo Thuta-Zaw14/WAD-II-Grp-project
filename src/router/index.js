@@ -6,6 +6,8 @@ import { auth } from '../firebase'
 import LoginPage from '../view/LoginPage.vue'
 import HomePage from '../view/HomePage.vue'
 import SessionsPage from '../view/SessionsPage.vue'
+
+
 import AdminPage from '../view/AdminPage.vue'
 import AdminUserProfilePage from '../view/AdminUserProfilePage.vue'
 
