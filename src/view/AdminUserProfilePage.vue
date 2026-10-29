@@ -1,8 +1,8 @@
-
 <script setup>
 import { onMounted, ref } from 'vue'
 import axios from 'axios'
 import { useRoute, useRouter } from 'vue-router'
+import { auth } from '../firebase'
 
 const route = useRoute()
 const router = useRouter()
@@ -12,23 +12,57 @@ const warningReason = ref('')
 const submitting = ref(false)
 const actionMessage = ref('')
 const actionError = ref('')
-const user = ref([])
+
+const user = ref({
+    warnings: [],
+    reports: [],
+    skillsTeach: [],
+    skillsLearn: []
+})
+
+async function getAuthHeaders() {
+    const token = await auth.currentUser?.getIdToken()
+
+    return {
+        headers: {
+            Authorization: `Bearer ${token}`
+        }
+    }
+}
 
 async function viewUser(firebaseUid) {
     router.push('/admin/users/' + firebaseUid)
-    await loadUser(firebaseUid)
 }
 
 async function loadUser(firebaseUid) {
     try {
-        const response = await axios.get('/api/admins/users/' + firebaseUid)
-        user.value = response.data
+        const config = await getAuthHeaders()
+
+        const response = await axios.get(
+            '/api/admins/users/' + firebaseUid,
+            config
+        )
+
+        user.value = {
+            warnings: [],
+            reports: [],
+            skillsTeach: [],
+            skillsLearn: [],
+            ...response.data
+        }
+
     } catch (error) {
         console.log(error)
+
+        if (error.response?.status === 403) {
+            router.push('/')
+        }
     }
 }
 
 function formatDate(date) {
+    if (!date) return '-'
+
     const d = new Date(date)
 
     const day = String(d.getDate()).padStart(2, '0')
@@ -50,16 +84,26 @@ async function banUsers(firebaseUid) {
     actionMessage.value = ''
 
     try {
-        await axios.put('/api/admins/users/ban', {
-            firebaseUid,
-            isBanned: true
-        })
+        const config = await getAuthHeaders()
+
+        await axios.put(
+            '/api/admins/ban',
+            {
+                firebaseUid
+            },
+            config
+        )
 
         user.value.isBanned = true
-        actionMessage.value = 'User banned successfully.'
+
+        actionMessage.value =
+            'User banned successfully.'
+
     } catch (error) {
         actionError.value =
-            error.response?.data?.message || 'Failed to ban user.'
+            error.response?.data?.message ||
+            'Failed to ban user.'
+
     } finally {
         submitting.value = false
     }
@@ -77,16 +121,26 @@ async function unbanUsers(firebaseUid) {
     actionMessage.value = ''
 
     try {
-        await axios.put('/api/admins/users/unban', {
-            firebaseUid,
-            isBanned: false
-        })
+        const config = await getAuthHeaders()
+
+        await axios.put(
+            '/api/admins/unban',
+            {
+                firebaseUid
+            },
+            config
+        )
 
         user.value.isBanned = false
-        actionMessage.value = 'User unbanned successfully.'
+
+        actionMessage.value =
+            'User unbanned successfully.'
+
     } catch (error) {
         actionError.value =
-            error.response?.data?.message || 'Failed to unban user.'
+            error.response?.data?.message ||
+            'Failed to unban user.'
+
     } finally {
         submitting.value = false
     }
@@ -96,7 +150,8 @@ async function issueWarning() {
     const reason = warningReason.value.trim()
 
     if (!reason) {
-        actionError.value = 'Please enter a warning reason.'
+        actionError.value =
+            'Please enter a warning reason.'
         return
     }
 
@@ -107,33 +162,48 @@ async function issueWarning() {
     actionMessage.value = ''
 
     try {
-        const response = await axios.post('/api/admins/users/warn', {
-            firebaseUid: user.value.firebaseUid,
-            warning: reason
-        })
+        const config = await getAuthHeaders()
 
-        const savedWarning = response.data.warning || {
-            reason,
-            createdAt: new Date().toISOString()
-        }
+        const response = await axios.post(
+            '/api/admins/users/warn',
+            {
+                firebaseUid:
+                    user.value.firebaseUid,
+                warning: reason
+            },
+            config
+        )
 
-        user.value.warnings.unshift(savedWarning)
+        const savedWarning =
+            response.data.warning || {
+                reason,
+                createdAt:
+                    new Date().toISOString()
+            }
 
-        actionMessage.value = 'Warning issued successfully.'
+        user.value.warnings.unshift(
+            savedWarning
+        )
+
+        actionMessage.value =
+            'Warning issued successfully.'
+
         warningReason.value = ''
         inputReason.value = false
+
     } catch (error) {
         actionError.value =
-            error.response?.data?.message || 'Failed to issue warning.'
+            error.response?.data?.message ||
+            'Failed to issue warning.'
+
     } finally {
         submitting.value = false
     }
 }
 
-    onMounted(() => {
-        loadUser(route.params.uid)
-    })
-
+onMounted(() => {
+    loadUser(route.params.uid)
+})
 </script>
 
 <template>

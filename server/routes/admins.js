@@ -1,62 +1,33 @@
 import express from 'express'
-import User from '../models/User.js'
 import { verifyToken } from '../middleware/verifyToken.js'
+import { verifyAdmin } from '../middleware/verifyAdmin.js'
+import { db } from '../config/firebase.js'
+
+import {
+    collection,
+    getDocs,
+    doc,
+    getDoc,
+    updateDoc,
+    arrayUnion
+} from 'firebase/firestore'
 
 const router = express.Router()
 
-// Load data into admin page
-router.get('/users', verifyToken, async (req, res) => {
+// Load all users into admin page
+router.get('/users', verifyToken, verifyAdmin, async (req, res) => {
     try {
-        const users = await User.find({ isAdmin : false })
+        const snapshot = await getDocs(collection(db, 'users'))
+
+        const users = snapshot.docs
+            .map(docSnapshot => ({
+                firebaseUid: docSnapshot.id,
+                ...docSnapshot.data()
+            }))
+            .filter(user => !user.isAdmin)
+
         res.json(users)
-    } catch (error) {
-        res.status(500).json({
-            message: error.message
-        })
-    }
-})
 
-// Ban users
-router.put('/ban', verifyToken, async (req, res) => { 
-    try {
-        const { firebaseUid, isBanned } = req.body
-        const user = await User.findOneAndUpdate(
-            { firebaseUid }, 
-            { isBanned },
-            { new: true }
-        )
-
-        if (!user) {
-            return res.status(404).json({ 
-                message: 'User not found'
-            })
-        }
-
-        res.json(user)
-    } catch (error) {
-        res.status(500).json({
-            message: error.message
-        })
-    }
-})
-
-// Unban users
-router.put('/unban', verifyToken, async (req, res) => { 
-    try {
-        const { firebaseUid, isBanned } = req.body
-        const user = await User.findOneAndUpdate(
-            { firebaseUid }, 
-            { isBanned },
-            { new: true }
-        )
-
-        if (!user) {
-            return res.status(404).json({ 
-                message: 'User not found'
-            })
-        }
-
-        res.json(user)
     } catch (error) {
         res.status(500).json({
             message: error.message
@@ -65,20 +36,21 @@ router.put('/unban', verifyToken, async (req, res) => {
 })
 
 // View a single user profile
-router.get('/users/:uid', verifyToken, async (req, res) => {
+router.get('/users/:uid', verifyToken, verifyAdmin, async (req, res) => {
     try {
+        const userRef = doc(db, 'users', req.params.uid)
+        const userSnap = await getDoc(userRef)
 
-        const user = await User.findOne({
-            firebaseUid: req.params.uid
-        })
-
-        if (!user) {
+        if (!userSnap.exists()) {
             return res.status(404).json({
                 message: 'User not found'
             })
         }
 
-        res.json(user)
+        res.json({
+            firebaseUid: userSnap.id,
+            ...userSnap.data()
+        })
 
     } catch (error) {
         res.status(500).json({
@@ -87,8 +59,88 @@ router.get('/users/:uid', verifyToken, async (req, res) => {
     }
 })
 
-// Issue a warning
-router.post('/users/warn', verifyToken, async (req, res) => {
+// Ban user
+router.put('/ban', verifyToken, verifyAdmin, async (req, res) => {
+    try {
+        const { firebaseUid } = req.body
+
+        if (!firebaseUid) {
+            return res.status(400).json({
+                message: 'User ID is required'
+            })
+        }
+
+        const userRef = doc(db, 'users', firebaseUid)
+
+        const userSnap = await getDoc(userRef)
+
+        if (!userSnap.exists()) {
+            return res.status(404).json({
+                message: 'User not found'
+            })
+        }
+
+        await updateDoc(userRef, {
+            isBanned: true
+        })
+
+        const updatedUser = await getDoc(userRef)
+
+        res.json({
+            message: 'User banned successfully',
+            firebaseUid,
+            ...updatedUser.data()
+        })
+
+    } catch (error) {
+        res.status(500).json({
+            message: error.message
+        })
+    }
+})
+
+// Unban user
+router.put('/unban', verifyToken, verifyAdmin, async (req, res) => {
+    try {
+        const { firebaseUid } = req.body
+
+        if (!firebaseUid) {
+            return res.status(400).json({
+                message: 'User ID is required'
+            })
+        }
+
+        const userRef = doc(db, 'users', firebaseUid)
+
+        const userSnap = await getDoc(userRef)
+
+        if (!userSnap.exists()) {
+            return res.status(404).json({
+                message: 'User not found'
+            })
+        }
+
+        await updateDoc(userRef, {
+            isBanned: false
+        })
+
+        const updatedUser = await getDoc(userRef)
+
+        res.json({
+            message: 'User unbanned successfully',
+            firebaseUid,
+            ...updatedUser.data()
+        })
+
+    } catch (error) {
+        res.status(500).json({
+            message: error.message
+        })
+    }
+})
+
+// Issue warning
+router.post('/users/warn', verifyToken, verifyAdmin, async (req, res) => {
     try {
         const { firebaseUid, warning } = req.body
 
@@ -98,29 +150,70 @@ router.post('/users/warn', verifyToken, async (req, res) => {
             })
         }
 
-        const user = await User.findOneAndUpdate(
-            { firebaseUid },
-            {
-                $push: {
-                    warnings: {
-                        reason: warning.trim(),
-                        createdAt: new Date()
-                    }
-                }
-            },
-            { new: true, runValidators: true }
-        )
+        const userRef = doc(db, 'users', firebaseUid)
 
-        if (!user) {
+        const userSnap = await getDoc(userRef)
+
+        if (!userSnap.exists()) {
             return res.status(404).json({
                 message: 'User not found'
             })
         }
 
+        const newWarning = {
+            reason: warning.trim(),
+            createdAt: new Date().toISOString()
+        }
+
+        await updateDoc(userRef, {
+            warnings: arrayUnion(newWarning)
+        })
+
         res.json({
             message: 'Warning issued successfully',
-            warning: user.warnings[user.warnings.length - 1]
+            warning: newWarning
         })
+
+    } catch (error) {
+        res.status(500).json({
+            message: error.message
+        })
+    }
+})
+
+// Clear warning by index
+router.delete('/users/:uid/warnings/:index', verifyToken, verifyAdmin, async (req, res) => {
+    try {
+        const { uid, index } = req.params
+
+        const userRef = doc(db, 'users', uid)
+
+        const userSnap = await getDoc(userRef)
+
+        if (!userSnap.exists()) {
+            return res.status(404).json({
+                message: 'User not found'
+            })
+        }
+
+        const warnings = userSnap.data().warnings || []
+
+        if (index < 0 || index >= warnings.length) {
+            return res.status(400).json({
+                message: 'Invalid warning index'
+            })
+        }
+
+        warnings.splice(index, 1)
+
+        await updateDoc(userRef, {
+            warnings
+        })
+
+        res.json({
+            message: 'Warning removed successfully'
+        })
+
     } catch (error) {
         res.status(500).json({
             message: error.message
