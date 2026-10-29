@@ -6,23 +6,7 @@ import { auth } from '../firebase'
 import LoginPage from '../view/LoginPage.vue'
 import HomePage from '../view/HomePage.vue'
 import SessionsPage from '../view/SessionsPage.vue'
-
-
-import AdminPage from '../view/AdminPage.vue'
-import AdminUserProfilePage from '../view/AdminUserProfilePage.vue'
-
-function getCurrentUser() {
-    return new Promise((resolve, reject) => {
-        const unsubscribe = onAuthStateChanged(
-            auth,
-            user => {
-                unsubscribe()
-                resolve(user)
-            },
-            reject
-        )
-    })
-}
+import InsightsPage from '../view/Insightspage.vue'
 
 const router = createRouter({
     history: createWebHistory(import.meta.env.BASE_URL),
@@ -67,54 +51,28 @@ const router = createRouter({
             meta: {
                 requiresAdmin: true
             }
+        },
+        {   path: '/insights', 
+            component: InsightsPage,
+            meta: {
+            requiresAuth: true
         }
+        },
     ]
 })
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+function getCurrentUser() {
+    return new Promise((resolve, reject) => {
+        const unsubscribe = onAuthStateChanged(
+            auth,
+            user => {
+                unsubscribe()
+                resolve(user)
+            },
+            reject
+        )
+    })
+}
 
 router.beforeEach(async (to, from, next) => {
 
@@ -158,6 +116,6 @@ router.beforeEach(async (to, from, next) => {
     }
 
     next()
-})
-
+}
+)
 export default router
