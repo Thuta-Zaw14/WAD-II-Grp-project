@@ -1,31 +1,29 @@
-import { doc, getDoc } from 'firebase/firestore'
-import { db } from '../config/firebase.js'
+
+import { db } from '../config/firebaseAdmin.js'
 
 export const verifyAdmin = async (req, res, next) => {
     try {
-        const userRef = doc(db, 'users', req.user.uid)
+        const userRef = db.collection('users').doc(req.user.uid)
+        const userSnap = await userRef.get()
 
-        const userSnap = await getDoc(userRef)
-
-        if (!userSnap.exists()) {
+        if (!userSnap.exists) {
             return res.status(404).json({
                 message: 'User not found'
             })
         }
 
-        const user = userSnap.data()
-
-        if (!user.isAdmin) {
+        if (userSnap.data().isAdmin !== true) {
             return res.status(403).json({
                 message: 'Admin access required'
             })
         }
 
-        next()
-
+        return next()
     } catch (error) {
-        res.status(500).json({
-            message: error.message
+        console.error('Admin verification error:', error)
+
+        return res.status(500).json({
+            message: 'Failed to verify admin permissions'
         })
     }
 }

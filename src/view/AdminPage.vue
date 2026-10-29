@@ -20,27 +20,36 @@ async function logout() {
 
 async function loadUsers() {
     try {
-        const token = await auth.currentUser?.getIdToken()
+        const user = auth.currentUser
 
-        const response = await axios.get(
-            '/api/admins/users',
-            {
-                headers: {
-                    Authorization: `Bearer ${token}`
-                }
+        if (!user) {
+            await router.replace('/login')
+            return
+        }
+
+        const token = await user.getIdToken()
+
+        const response = await axios.get('/api/admins/users', {
+            headers: {
+                Authorization: `Bearer ${token}`
             }
-        )
+        })
 
         users.value = response.data
 
     } catch (error) {
+        console.error('Failed to load admin users:' + error)
+
+        if (error.response?.status === 401) {
+            await router.replace('/login')
+            return
+        }
 
         if (error.response?.status === 403) {
             alert('Admin access required')
-            router.push('/')
+            await router.replace('/home')
+            return
         }
-
-        console.log(error)
     }
 }
 

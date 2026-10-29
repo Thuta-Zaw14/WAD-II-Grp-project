@@ -6,6 +6,7 @@ import {
   createUserWithEmailAndPassword,
 } from 'firebase/auth'
 import { useRouter } from 'vue-router'
+import axios from 'axios'
 
 import loginImg from '../assets/login.jpg'
 import signupImg from '../assets/signup.jpg'
@@ -34,8 +35,21 @@ async function submit() {
     } else {
       const result = await signInWithEmailAndPassword(auth, email.value, password.value)
       message.value = 'Logged in as ' + result.user.email
+      const token = await result.user.getIdToken()
+      try {
+        await axios.get('/api/admins/check', {
+          headers: {
+            Authorization: `Bearer ${token}`
+          }
+        })
+        message.value = 'Logged in as admin'
+        router.push('/admins')
+      } catch (error) {
+        console.log(error)
+        message.value = 'Logged in as user: ' + result.user.email 
+        router.push('/home')
+      }
     }
-    router.push('/home')
   } catch (error) {
     isError.value = true
     message.value = 'Failed: ' + error.code

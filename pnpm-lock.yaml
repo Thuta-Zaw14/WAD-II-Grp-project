@@ -14,9 +14,15 @@ importers:
       bootstrap:
         specifier: ^5.3.8
         version: 5.3.8(@popperjs/core@2.11.8)
+      chart.js:
+        specifier: ^4.6.1
+        version: 4.6.1
       firebase:
         specifier: ^13.0.0
         version: 13.1.0
+      leaflet:
+        specifier: ^1.9.4
+        version: 1.9.4
       pinia:
         specifier: ^4.0.3
         version: 4.1.0(@vue/devtools-api@8.2.1)(vue@3.5.44)
@@ -449,6 +455,9 @@ packages:
   '@jridgewell/trace-mapping@0.3.31':
     resolution: {integrity: sha512-zzNR+SdQSDJzc8joaeP8QQoCQr8NuYx2dIIytl1QeBEZHJ9uW6hebsrYgbz8hJwUQao3TWCMtmfV8Nu1twOLAw==}
 
+  '@kurkle/color@0.3.4':
+    resolution: {integrity: sha512-M5UknZPHRu3DEDWoipU6sE8PdkZ6Z/S+v4dD+Ke8IaNlpdSQah50lz1KtcFBa2vsdOnwbbnxJwVM4wty6udA5w==}
+
   '@oxc-project/types@0.155.0':
     resolution: {integrity: sha512-SeE8JPwW1xs1tHeNycjUtUBdhorRa8o4jlvjwk49R7/Z291i+4DQa7JJIgOm/TaYQZx+QrPQbVJ/9c8dMIZN8Q==}
 
@@ -734,6 +743,10 @@ packages:
   caniuse-lite@1.0.30001819:
     resolution: {integrity: sha512-LFUqIIAwpzsIuevnKnsR9qnStBcgzPShTX61lBwN9uFkkf8o8zLiebEjbW8AYtZiF+1YKDWfdt/pWDtMuG8Xwg==}
 
+  chart.js@4.6.1:
+    resolution: {integrity: sha512-hJyniucsFmq//EvXYvJ6c6mahPoI3kaxdjVH8awTaJ/fDNWeSqqqArixMJWkWNN6fcYvPU3HneSANFNYtRi61g==}
+    engines: {pnpm: '>=8'}
+
   chokidar@5.0.0:
     resolution: {integrity: sha512-TQMmc3w+5AxjpL8iIiwebF73dRDF4fBIieAqGn9RGCWaEVwQ6Fb2cGe31Yns0RRIzii5goJ1Y7xbMwo1TxMplw==}
     engines: {node: '>= 20.19.0'}
@@ -959,6 +972,9 @@ packages:
 
   kolorist@1.8.0:
     resolution: {integrity: sha512-Y+60/zizpJ3HRH8DCss+q95yr6145JXZo46OTpFvDZWLfRCE4qChOyk1b26nMaNpfHHgxagk9dXT5OP0Tfe+dQ==}
+
+  leaflet@1.9.4:
+    resolution: {integrity: sha512-nxS1ynzJOmOlHp+iL3FyWqK89GtNL8U8rvlMOsQdTTssxZwCXh8N2NB3GDQOL+YR3XnWyZAxwQixURb+FA74PA==}
 
   lightningcss-android-arm64@1.33.0:
     resolution: {integrity: sha512-gEpRTalKdosp4Bb8qWtc2iOgE5SeIHlpS1up9bFq2wAyYhl1UdTObYiHe98zEM9SQvSoqQZ1IQD0JNpg3Ml5pg==}
@@ -1956,6 +1972,8 @@ snapshots:
       '@jridgewell/resolve-uri': 3.1.2
       '@jridgewell/sourcemap-codec': 1.6.0
 
+  '@kurkle/color@0.3.4': {}
+
   '@oxc-project/types@0.155.0': {}
 
   '@polka/url@1.0.0-next.29': {}
@@ -2227,6 +2245,10 @@ snapshots:
 
   caniuse-lite@1.0.30001819: {}
 
+  chart.js@4.6.1:
+    dependencies:
+      '@kurkle/color': 0.3.4
+
   chokidar@5.0.0:
     dependencies:
       readdirp: 5.1.1
@@ -2437,6 +2459,8 @@ snapshots:
   json5@2.2.3: {}
 
   kolorist@1.8.0: {}
+
+  leaflet@1.9.4: {}
 
   lightningcss-android-arm64@1.33.0:
     optional: true

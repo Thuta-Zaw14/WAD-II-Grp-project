@@ -1,7 +1,8 @@
 import express from 'express'
 import { verifyToken } from '../middleware/verifyToken.js'
 import { verifyAdmin } from '../middleware/verifyAdmin.js'
-import { db } from '../config/firebase.js'
+import { db } from '../config/firebaseAdmin.js'
+import { FieldValue } from 'firebase-admin/firestore'
 
 import {
     collection,
@@ -14,10 +15,14 @@ import {
 
 const router = express.Router()
 
+router.get('/check', verifyToken, verifyAdmin, (req, res) => {
+    res.json({ isAdmin: true })
+})
+
 // Load all users into admin page
 router.get('/users', verifyToken, verifyAdmin, async (req, res) => {
     try {
-        const snapshot = await getDocs(collection(db, 'users'))
+        const snapshot = await db.collection('users').get()
 
         const users = snapshot.docs
             .map(docSnapshot => ({
@@ -29,6 +34,7 @@ router.get('/users', verifyToken, verifyAdmin, async (req, res) => {
         res.json(users)
 
     } catch (error) {
+        console.log(error.message)
         res.status(500).json({
             message: error.message
         })
@@ -36,12 +42,15 @@ router.get('/users', verifyToken, verifyAdmin, async (req, res) => {
 })
 
 // View a single user profile
+
 router.get('/users/:uid', verifyToken, verifyAdmin, async (req, res) => {
     try {
-        const userRef = doc(db, 'users', req.params.uid)
-        const userSnap = await getDoc(userRef)
+        const userSnap = await db
+            .collection('users')
+            .doc(req.params.uid)
+            .get()
 
-        if (!userSnap.exists()) {
+        if (!userSnap.exists) {
             return res.status(404).json({
                 message: 'User not found'
             })
@@ -53,13 +62,17 @@ router.get('/users/:uid', verifyToken, verifyAdmin, async (req, res) => {
         })
 
     } catch (error) {
+        console.error('Failed to fetch user:', error)
+
         res.status(500).json({
             message: error.message
         })
     }
 })
 
+
 // Ban user
+
 router.put('/ban', verifyToken, verifyAdmin, async (req, res) => {
     try {
         const { firebaseUid } = req.body
@@ -70,21 +83,21 @@ router.put('/ban', verifyToken, verifyAdmin, async (req, res) => {
             })
         }
 
-        const userRef = doc(db, 'users', firebaseUid)
+        const userRef = db.collection('users').doc(firebaseUid)
 
-        const userSnap = await getDoc(userRef)
+        const userSnap = await userRef.get()
 
-        if (!userSnap.exists()) {
+        if (!userSnap.exists) {
             return res.status(404).json({
                 message: 'User not found'
             })
         }
 
-        await updateDoc(userRef, {
+        await userRef.update({
             isBanned: true
         })
 
-        const updatedUser = await getDoc(userRef)
+        const updatedUser = await userRef.get()
 
         res.json({
             message: 'User banned successfully',
@@ -93,11 +106,14 @@ router.put('/ban', verifyToken, verifyAdmin, async (req, res) => {
         })
 
     } catch (error) {
+        console.error('Failed to ban user:', error)
+
         res.status(500).json({
             message: error.message
         })
     }
 })
+
 
 // Unban user
 router.put('/unban', verifyToken, verifyAdmin, async (req, res) => {
@@ -110,21 +126,20 @@ router.put('/unban', verifyToken, verifyAdmin, async (req, res) => {
             })
         }
 
-        const userRef = doc(db, 'users', firebaseUid)
+        const userRef = db.collection('users').doc(firebaseUid)
+        const userSnap = await userRef.get()
 
-        const userSnap = await getDoc(userRef)
-
-        if (!userSnap.exists()) {
+        if (!userSnap.exists) {
             return res.status(404).json({
                 message: 'User not found'
             })
         }
 
-        await updateDoc(userRef, {
+        await userRef.update({
             isBanned: false
         })
 
-        const updatedUser = await getDoc(userRef)
+        const updatedUser = await userRef.get()
 
         res.json({
             message: 'User unbanned successfully',
@@ -133,6 +148,8 @@ router.put('/unban', verifyToken, verifyAdmin, async (req, res) => {
         })
 
     } catch (error) {
+        console.error('Failed to unban user:', error)
+
         res.status(500).json({
             message: error.message
         })
@@ -140,21 +157,25 @@ router.put('/unban', verifyToken, verifyAdmin, async (req, res) => {
 })
 
 // Issue warning
+
 router.post('/users/warn', verifyToken, verifyAdmin, async (req, res) => {
     try {
         const { firebaseUid, warning } = req.body
 
-        if (!firebaseUid || !warning?.trim()) {
+        if (
+            !firebaseUid ||
+            typeof warning !== 'string' ||
+            !warning.trim()
+        ) {
             return res.status(400).json({
                 message: 'User ID and warning reason are required'
             })
         }
 
-        const userRef = doc(db, 'users', firebaseUid)
+        const userRef = db.collection('users').doc(firebaseUid)
+        const userSnap = await userRef.get()
 
-        const userSnap = await getDoc(userRef)
-
-        if (!userSnap.exists()) {
+        if (!userSnap.exists) {
             return res.status(404).json({
                 message: 'User not found'
             })
@@ -165,8 +186,8 @@ router.post('/users/warn', verifyToken, verifyAdmin, async (req, res) => {
             createdAt: new Date().toISOString()
         }
 
-        await updateDoc(userRef, {
-            warnings: arrayUnion(newWarning)
+        await userRef.update({
+            warnings: FieldValue.arrayUnion(newWarning)
         })
 
         res.json({
@@ -175,6 +196,8 @@ router.post('/users/warn', verifyToken, verifyAdmin, async (req, res) => {
         })
 
     } catch (error) {
+        console.error('Failed to issue warning:', error)
+
         res.status(500).json({
             message: error.message
         })
@@ -182,43 +205,60 @@ router.post('/users/warn', verifyToken, verifyAdmin, async (req, res) => {
 })
 
 // Clear warning by index
-router.delete('/users/:uid/warnings/:index', verifyToken, verifyAdmin, async (req, res) => {
-    try {
-        const { uid, index } = req.params
 
-        const userRef = doc(db, 'users', uid)
+router.delete(
+    '/users/:uid/warnings/:index',
+    verifyToken,
+    verifyAdmin,
+    async (req, res) => {
+        try {
+            const { uid, index } = req.params
+            const warningIndex = Number(index)
 
-        const userSnap = await getDoc(userRef)
+            if (
+                !Number.isInteger(warningIndex) ||
+                warningIndex < 0
+            ) {
+                return res.status(400).json({
+                    message: 'Invalid warning index'
+                })
+            }
 
-        if (!userSnap.exists()) {
-            return res.status(404).json({
-                message: 'User not found'
+            const userRef = db.collection('users').doc(uid)
+            const userSnap = await userRef.get()
+
+            if (!userSnap.exists) {
+                return res.status(404).json({
+                    message: 'User not found'
+                })
+            }
+
+            const warnings = userSnap.data().warnings || []
+
+            if (warningIndex >= warnings.length) {
+                return res.status(400).json({
+                    message: 'Invalid warning index'
+                })
+            }
+
+            warnings.splice(warningIndex, 1)
+
+            await userRef.update({
+                warnings
+            })
+
+            res.json({
+                message: 'Warning removed successfully'
+            })
+
+        } catch (error) {
+            console.error('Failed to remove warning:', error)
+
+            res.status(500).json({
+                message: error.message
             })
         }
-
-        const warnings = userSnap.data().warnings || []
-
-        if (index < 0 || index >= warnings.length) {
-            return res.status(400).json({
-                message: 'Invalid warning index'
-            })
-        }
-
-        warnings.splice(index, 1)
-
-        await updateDoc(userRef, {
-            warnings
-        })
-
-        res.json({
-            message: 'Warning removed successfully'
-        })
-
-    } catch (error) {
-        res.status(500).json({
-            message: error.message
-        })
     }
-})
+)
 
 export default router

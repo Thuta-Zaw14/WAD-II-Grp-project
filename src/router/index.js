@@ -6,6 +6,8 @@ import { auth } from '../firebase'
 import LoginPage from '../view/LoginPage.vue'
 import HomePage from '../view/HomePage.vue'
 import SessionsPage from '../view/SessionsPage.vue'
+import AdminPage from '../view/AdminPage.vue'
+import AdminUserProfilePage from '../view/AdminUserProfilePage.vue'
 import InsightsPage from '../view/Insightspage.vue'
 
 const router = createRouter({
@@ -38,7 +40,7 @@ const router = createRouter({
         },
 
         {
-            path: '/admin',
+            path: '/admins',
             component: AdminPage,
             meta: {
                 requiresAdmin: true
@@ -46,7 +48,7 @@ const router = createRouter({
         },
 
         {
-            path: '/admin/users/:uid',
+            path: '/admins/users/:uid',
             component: AdminUserProfilePage,
             meta: {
                 requiresAdmin: true
@@ -74,48 +76,65 @@ function getCurrentUser() {
     })
 }
 
-router.beforeEach(async (to, from, next) => {
+router.beforeEach(async (to) => {
+    const requiresAdmin = to.matched.some(
+        record => record.meta.requiresAdmin
+    )
 
-    const user = await getCurrentUser()
+    const requiresAuth = to.matched.some(
+        record => record.meta.requiresAuth
+    )
 
-    // Admin routes
-    if (to.meta.requiresAdmin) {
+    let user
 
-        if (!user) {
-            return next('/login')
-        }
+    try {
+        user = await getCurrentUser()
+    } catch (error) {
+        console.error('Firebase auth check failed:', error)
 
+        return (requiresAdmin || requiresAuth)
+            ? '/login'
+            : true
+    }
+
+    // Must be logged in for protected pages
+    if ((requiresAdmin || requiresAuth) && !user) {
+        return '/login'
+    }
+
+    // Must pass backend admin verification
+    if (requiresAdmin) {
         try {
-
             const token = await user.getIdToken()
 
-            await axios.get(
-                '/api/admins/users',
-                {
-                    headers: {
-                        Authorization: `Bearer ${token}`
-                    }
+            const response = await axios.get('/api/admins/check', {
+                headers: {
+                    Authorization: `Bearer ${token}`
                 }
+                
+            })
+            console.log(response)
+            return true
+        } catch (error) {
+            console.error(
+                'Admin verification failed:',
+                error.response?.status,
+                error.response?.data || error.message
             )
 
-            return next()
-
-        } catch (error) {
-
             if (error.response?.status === 403) {
-                return next('/home')
+                return '/home'
             }
 
-            return next('/login')
+            if (error.response?.status === 401) {
+                return '/login'
+            }
+
+            // Fail closed if the server cannot verify access
+            return '/home'
         }
     }
 
-    // Normal protected pages
-    if (to.meta.requiresAuth && !user) {
-        return next('/login')
-    }
-
-    next()
-}
-)
+    return true
+})
 export default router

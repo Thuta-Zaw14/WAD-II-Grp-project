@@ -31,7 +31,7 @@ async function getAuthHeaders() {
 }
 
 async function viewUser(firebaseUid) {
-    router.push('/admin/users/' + firebaseUid)
+    router.push('/admins/users/' + firebaseUid)
 }
 
 async function loadUser(firebaseUid) {
@@ -213,7 +213,7 @@ onMounted(() => {
             <!-- Back button -->
             <button
                 class="btn back-btn mb-4"
-                @click="router.push('/admin')"
+                @click="router.push('/admins')"
             >
                 ← Back to Dashboard
             </button>
@@ -265,11 +265,7 @@ onMounted(() => {
                                     {{ user.isBanned ? 'Banned' : 'Active' }}
                                 </span>
                             </p>
-
-                            <p>
-                                <strong>Admin:</strong>
-                                {{ user.isAdmin ? 'Yes' : 'No' }}
-                            </p>
+                            
                         </div>
                     </div>
 
