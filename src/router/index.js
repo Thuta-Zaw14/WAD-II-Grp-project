@@ -24,6 +24,53 @@ function getCurrentUser() {
     })
 }
 
+const router = createRouter({
+    history: createWebHistory(import.meta.env.BASE_URL),
+    routes: [
+        {
+            path: '/',
+            redirect: '/login'
+        },
+
+        {
+            path: '/login',
+            component: LoginPage
+        },
+
+        {
+            path: '/home',
+            component: HomePage,
+            meta: {
+                requiresAuth: true
+            }
+        },
+
+        {
+            path: '/sessions',
+            component: SessionsPage,
+            meta: {
+                requiresAuth: true
+            }
+        },
+
+        {
+            path: '/admin',
+            component: AdminPage,
+            meta: {
+                requiresAdmin: true
+            }
+        },
+
+        {
+            path: '/admin/users/:uid',
+            component: AdminUserProfilePage,
+            meta: {
+                requiresAdmin: true
+            }
+        }
+    ]
+})
+
 
 
 
