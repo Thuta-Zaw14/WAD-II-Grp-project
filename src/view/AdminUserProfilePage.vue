@@ -478,13 +478,22 @@ onMounted(() => {
                                             class="btn btn-link p-0 reporter-link"
                                             @click="viewUser(report.reporterUid)"
                                         >
-                                            {{ report.reporterName }}
+                                            {{ report.reporterName || 'Unknown' }}
                                         </button>
                                     </td>
 
-                                    <td>{{ report.reporterEmail }}</td>
-                                    <td>{{ report.reason }}</td>
-                                    <td>{{ formatDate(report.createdAt) }}</td>
+                                    <td>{{ report.reporterEmail || 'Unknown' }}</td>
+                                    <td>{{ report.reason || '' }}</td>
+                                    <td>{{ formatDate(report.createdAt) || '' }}</td>
+                                </tr>
+
+                                <tr v-if="user.reports.length === 0">
+                                    <td
+                                    colspan="4"
+                                    class="text-center text-muted py-4"
+                                    >
+                                    No reports submitted against this user.
+                                    </td>
                                 </tr>
                             </tbody>
                         </table>

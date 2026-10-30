@@ -57,10 +57,20 @@ function showUserProfile(firebaseUid) {
     router.push('/admins/users/' + firebaseUid)
 }
 
-function formatDate(date) {
-    if (!date) return '-'
+function formatDate(timestamp) {
+    if (!timestamp) return 'N/A'
 
-    return new Date(date).toLocaleDateString('en-SG')
+    const date = timestamp._seconds
+        ? new Date(timestamp._seconds * 1000)
+        : new Date(timestamp)
+
+    if (isNaN(date.getTime())) return 'N/A'
+
+    return date.toLocaleDateString('en-GB', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric'
+    })
 }
 
 const totalReports = computed(() =>

@@ -16,6 +16,7 @@ const router = useRouter()
 const isSignup = ref(false)
 const isError = ref(false)
 
+const name = ref('')
 const email = ref('')
 const password = ref('')
 const message = ref('')
@@ -28,34 +29,86 @@ function switchMode() {
 async function submit() {
   isError.value = false
   message.value = 'Trying...'
+
   try {
     if (isSignup.value) {
-      const result = await createUserWithEmailAndPassword(auth, email.value, password.value)
-      message.value = 'Account created for ' + result.user.email
-    } else {
-      const result = await signInWithEmailAndPassword(auth, email.value, password.value)
+    let createdUser = null
+
+  try {
+    // Create Firebase Authentication account
+    const result = await createUserWithEmailAndPassword(
+      auth,
+      email.value,
+      password.value
+    )
+
+    createdUser = result.user
+
+    const token = await createdUser.getIdToken()
+
+    // Create Firestore profile through backend
+    await axios.post('/api/users', {
+      name: name.value.trim()
+    }, {
+      headers: {
+        Authorization: `Bearer ${token}`
+      }
+    })
+
+    message.value = 'Account created for ' + createdUser.email
+    router.push('/home')
+
+  } catch (error) {
+
+    // If Firestore creation fails, delete Auth account
+    if (createdUser) {
+      try {
+        await deleteUser(createdUser)
+        console.log('Firebase Authentication account deleted')
+      } catch (deleteError) {
+        console.error('Failed to delete Auth account:', deleteError)
+      }
+    }
+
+    throw error
+  }
+  } else {
+      // Login
+      const result = await signInWithEmailAndPassword(
+        auth,
+        email.value,
+        password.value
+      )
+
       message.value = 'Logged in as ' + result.user.email
+
       const token = await result.user.getIdToken()
+
       try {
         await axios.get('/api/admins/check', {
           headers: {
             Authorization: `Bearer ${token}`
           }
         })
+
         message.value = 'Logged in as admin'
         router.push('/admins')
+
       } catch (error) {
         console.log(error)
-        message.value = 'Logged in as user: ' + result.user.email 
+        message.value = 'Logged in as user: ' + result.user.email
         router.push('/home')
       }
     }
+
   } catch (error) {
+    console.error(error)
     isError.value = true
-    message.value = 'Failed: ' + error.code
+    message.value = 'Failed: ' + (error.code || error.message)
   }
 }
 </script>
+
 
 <template>
   <div class="page">
@@ -71,6 +124,11 @@ async function submit() {
       <div class="col-12 col-md-6 form-side d-flex align-items-center justify-content-center p-3 p-md-4">
         <form class="card border-0 shadow w-100 p-4 p-md-5" @submit.prevent="submit">
           <h2 class="h4 mb-4">{{ isSignup ? 'Sign up' : 'Login' }}</h2>
+
+          <div class="mb-3" v-if="isSignup">
+            <label for="name" class="form-label fw-semibold">Name</label>
+            <input id="name" v-model="name" type="text" class="form-control" required />
+          </div>
 
           <div class="mb-3">
             <label for="email" class="form-label fw-semibold">Email</label>
