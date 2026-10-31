@@ -2,7 +2,7 @@
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import * as session from "../../server/models/Sessions"
-import { deleteDocR } from '../../server/models/dbQuery'
+
 const router = useRouter()
 
 // Fake data for now
@@ -42,7 +42,7 @@ function goHome() {
 <template>
   <nav class="navbar border-bottom px-3">
     <span class="navbar-brand fw-bold">Kongsi</span>
-    <span class="text-dark" role="button" @click="deleteDocR('users','name','fak')">Back to home</span>
+    <span class="text-dark" role="button" @click="session.getUsersOfSession('hMrIpwe2av81HVz2s4Ph')">Back to home</span>
   </nav>
 
   <div class="container py-4">

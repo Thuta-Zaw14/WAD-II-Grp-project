@@ -1,6 +1,6 @@
 import db from './db';
 import * as fb from 'firebase/firestore';
-import * as admin from 'firebase-admin';
+
 export async function DupeExist(collection, fieldName, value) {
         const q = fb.query(fb.collection(db, collection),fb.where(fieldName,'==',value),fb.limit(1));
         const userExist = await fb.getDocs(q);
@@ -59,6 +59,6 @@ export async function addDocID(col, doc, id) {
     })
 }
 
-export async function deleteDocR(col, field, value) {
-    await admin.firestore().recursiveDelete(findDocWhereEquals(col,field,value)["docs"].id);   
-}
+// export async function deleteDocR(col, field, value) {
+//     await admin.firestore().recursiveDelete(findDocWhereEquals(col,field,value)["docs"].id);   
+// }

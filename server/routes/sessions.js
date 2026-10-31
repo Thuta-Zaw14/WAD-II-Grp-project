@@ -3,7 +3,7 @@ import Sessions from '../models/Sessions';
 
 const router = express.Router();
 
-router.post('/', async (req,res) => {
-    
+router.post('/session', async (req,res) => {
+    const data = req.body.data;
 
 })

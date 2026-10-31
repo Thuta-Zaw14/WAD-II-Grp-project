@@ -37,3 +37,12 @@ export async function addUser(user) {
    const res = await dbQuery.addDoc('users',user);
 }
 
+export async function seshSummary() {
+    // return skill name, location, date of first lesson
+    fb.getDocs(fb.query(fb.collection()))
+
+}
+
+export async function seshAll() {
+
+}
