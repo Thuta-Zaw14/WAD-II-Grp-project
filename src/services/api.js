@@ -1,5 +1,6 @@
+import axios from 'axios'
 import { auth } from '../firebase'
-
+ 
 const API = import.meta.env.VITE_API_URL
 
 async function authFetch(path, method = 'GET', data = undefined) {
@@ -30,9 +31,11 @@ async function authFetch(path, method = 'GET', data = undefined) {
 
   return response.json()
 }
+ 
 
-export function createProfile() {
-  return authFetch('/users', 'POST')
+export async function createProfile() {
+  const response = await axios.post(API + '/users', {}, await authConfig())
+  return response.data
 }
 
 export function getMe() {

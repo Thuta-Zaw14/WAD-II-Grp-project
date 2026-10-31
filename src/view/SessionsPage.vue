@@ -1,6 +1,7 @@
 <script setup>
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
+import * as session from "../../server/models/Sessions"
 
 const router = useRouter()
 
@@ -19,6 +20,7 @@ function toggleStatus(s) {
 }
 }
 
+
 function removeSession(id) {
     const updatedSessions = []
 
@@ -34,12 +36,13 @@ function removeSession(id) {
 function goHome() {
   router.push('/home')
 }
+
 </script>
 
 <template>
   <nav class="navbar border-bottom px-3">
     <span class="navbar-brand fw-bold">Kongsi</span>
-    <span class="text-dark" role="button" @click="goHome">Back to home</span>
+    <span class="text-dark" role="button" @click="session.getUsersOfSession('hMrIpwe2av81HVz2s4Ph')">Back to home</span>
   </nav>
 
   <div class="container py-4">
