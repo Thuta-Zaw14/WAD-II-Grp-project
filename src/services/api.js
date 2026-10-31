@@ -46,3 +46,19 @@ export function updateProfile(profileData) {
 export function getMySkillCards() {
   return authFetch('/users/me/skill-cards', 'GET')
 }
+
+export function getMySkills() {
+  return authFetch('/skills/mine', 'GET')
+}
+
+export function createSkill(skill) {
+  return authFetch('/skills', 'POST', skill)
+}
+
+export function updateSkill(id, skill) {
+  return authFetch('/skills/' + id, 'PUT', skill)
+}
+
+export function deleteSkill(id) {
+  return authFetch('/skills/' + id, 'DELETE')
+}

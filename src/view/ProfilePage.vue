@@ -1,36 +1,31 @@
 <script setup>
-import { computed, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
+import { useRouter } from 'vue-router'
+import { waitForUser } from '../services/currentUser'
+import {
+  ensureUserProfile,
+  getPastSkillCards,
+  updateUserProfile,
+} from '../services/skills'
 import SkillCard from '../component/SkillCard.vue'
 
-// DEMO DATA — not yet connected to MongoDB.
+const router = useRouter()
+let uid = null
+
 const profile = ref({
-  name: 'Demo User',
-  bio: 'Passionate about sharing knowledge, learning new things, and connecting with people.',
-  location: 'Singapore',
-  interests: ['Sports', 'Photography', 'Technology'],
-  skillsTeach: ['Tennis', 'Photography'],
-  skillsLearn: ['Guitar', 'Web Development'],
-  credits: 2
+  name: '',
+  bio: '',
+  location: '',
+  interests: [],
+  skillsTeach: [],
+  skillsLearn: [],
+  credits: 0,
 })
 
-const skillCards = ref([
-  {
-    id: 1,
-    name: 'Tennis Fundamentals',
-    category: 'Sports',
-    subskills: ['Forehand', 'Backhand', 'Serving'],
-    issuer: 'Alex T.',
-    dateAttained: '2026-10-15'
-  },
-  {
-    id: 2,
-    name: 'Photography Basics',
-    category: 'Creative',
-    subskills: ['Composition', 'Exposure'],
-    issuer: 'Mei L.',
-    dateAttained: '2026-10-18'
-  }
-])
+const skillCards = ref([])
+const loading = ref(true)
+const loadError = ref('')
+const isSaving = ref(false)
 
 const isEditing = ref(false)
 const formError = ref('')
@@ -39,8 +34,6 @@ const draft = reactive({
   bio: '',
   location: '',
   interests: '',
-  skillsTeach: '',
-  skillsLearn: ''
 })
 
 const initials = computed(() =>
@@ -52,13 +45,59 @@ const initials = computed(() =>
     .join('') || '?'
 )
 
+function formatDate(value) {
+  if (value?.toDate) value = value.toDate()
+  if (value instanceof Date) return value.toISOString().slice(0, 10)
+  return typeof value === 'string' ? value.slice(0, 10) : ''
+}
+
+async function loadProfile() {
+  try {
+    const user = await waitForUser()
+    if (!user) {
+      router.push('/login')
+      return
+    }
+
+    uid = user.uid
+    const userProfile = await ensureUserProfile(user)
+    const cards = await getPastSkillCards(uid)
+
+    profile.value = {
+      name: userProfile.name || user.displayName || user.email?.split('@')[0] || 'Kongsi Member',
+      bio: userProfile.bio || '',
+      location: userProfile.location || '',
+      interests: Array.isArray(userProfile.interests) ? userProfile.interests : [],
+      skillsTeach: Array.isArray(userProfile.skillsTeach) ? userProfile.skillsTeach : [],
+      skillsLearn: Array.isArray(userProfile.skillsLearn) ? userProfile.skillsLearn : [],
+      credits: userProfile.credits ?? 0,
+    }
+    skillCards.value = cards.map((card) => ({
+      ...card,
+      name: card.name || card.title || card.skill || '',
+      issuer: card.issuer || card.teacherName || card.teacher || '',
+      dateAttained: formatDate(card.dateAttained || card.completedAt || card.createdAt),
+      subskills: Array.isArray(card.subskills) ? card.subskills : [],
+    }))
+  } catch (error) {
+    console.error('Could not load profile:', error)
+    loadError.value = 'Could not load your profile. Please try again.'
+  } finally {
+    loading.value = false
+  }
+}
+
+onMounted(loadProfile)
+
+function skillEditPath(kind, title) {
+  return `/skills/${kind}/${encodeURIComponent(title)}/edit`
+}
+
 function startEditing() {
   draft.name = profile.value.name
   draft.bio = profile.value.bio
   draft.location = profile.value.location
   draft.interests = profile.value.interests.join(', ')
-  draft.skillsTeach = profile.value.skillsTeach.join(', ')
-  draft.skillsLearn = profile.value.skillsLearn.join(', ')
   formError.value = ''
   isEditing.value = true
 }
@@ -76,8 +115,9 @@ function parseList(value) {
   )]
 }
 
-function previewChanges() {
+async function saveChanges() {
   const name = draft.name.trim()
+  formError.value = ''
 
   if (!name) {
     formError.value = 'Please enter your name.'
@@ -99,30 +139,31 @@ function previewChanges() {
     return
   }
 
-  const lists = {
-    interests: parseList(draft.interests),
-    skillsTeach: parseList(draft.skillsTeach),
-    skillsLearn: parseList(draft.skillsLearn)
-  }
+  const interests = parseList(draft.interests)
 
-  if (Object.values(lists).some(items =>
-    items.length > 15 || items.some(item => item.length > 50)
-  )) {
+  if (interests.length > 15 || interests.some(item => item.length > 50)) {
     formError.value = 'Each list can contain up to 15 items, with 50 characters per item.'
     return
   }
 
-  // Local preview only. This does NOT save changes to MongoDB.
-  profile.value = {
-    ...profile.value,
+  isSaving.value = true
+  const updatedProfile = {
     name,
     bio: draft.bio.trim(),
     location: draft.location.trim(),
-    ...lists
+    interests,
   }
 
-  isEditing.value = false
-  formError.value = ''
+  try {
+    await updateUserProfile(uid, updatedProfile)
+    profile.value = { ...profile.value, ...updatedProfile }
+    isEditing.value = false
+  } catch (error) {
+    console.error('Could not save profile:', error)
+    formError.value = 'Could not save your profile. Please try again.'
+  } finally {
+    isSaving.value = false
+  }
 }
 
 </script>
@@ -130,13 +171,26 @@ function previewChanges() {
 <template>
   <main class="profile-page">
     <div class="container py-5">
+      <button
+        class="btn btn-outline-secondary mb-3"
+        type="button"
+        @click="router.push('/home')"
+      >
+        To Home Page
+      </button>
+
+      <p v-if="loading" class="muted" role="status">Loading your profile...</p>
+      <div v-else-if="loadError" class="alert alert-danger" role="alert">
+        {{ loadError }}
+      </div>
+
+      <template v-else>
       <div class="page-heading mb-4">
         <div>
           <p class="eyebrow">YOUR KONGSI SPACE</p>
           <h1>My Profile</h1>
           <p class="subtitle">Share what you know. Discover what you can learn.</p>
         </div>
-        <span class="demo-label">Demo preview · Not saved to database</span>
       </div>
 
       <!-- Profile header -->
@@ -204,17 +258,24 @@ function previewChanges() {
             </p>
 
             <div class="tag-list">
-              <span
+              <RouterLink
                 v-for="skill in profile.skillsTeach"
-                :key="skill"
+                :key="skill.title"
                 class="skill-tag teach-tag"
+                :to="skillEditPath('teach', skill.title)"
               >
-                {{ skill }}
-              </span>
+                {{ skill.title }}
+              </RouterLink>
               <p v-if="!profile.skillsTeach.length" class="muted">
                 No teaching skills added yet.
               </p>
             </div>
+            <RouterLink
+              class="skill-action-button teach-action"
+              to="/skills/teach/new"
+            >
+              Add a skill to teach
+            </RouterLink>
           </section>
         </div>
 
@@ -228,17 +289,24 @@ function previewChanges() {
             </p>
 
             <div class="tag-list">
-              <span
+              <RouterLink
                 v-for="skill in profile.skillsLearn"
-                :key="skill"
+                :key="skill.title"
                 class="skill-tag learn-tag"
+                :to="skillEditPath('learn', skill.title)"
               >
-                {{ skill }}
-              </span>
+                {{ skill.title }}
+              </RouterLink>
               <p v-if="!profile.skillsLearn.length" class="muted">
                 No learning skills added yet.
               </p>
             </div>
+            <RouterLink
+              class="skill-action-button learn-action"
+              to="/skills/learn/new"
+            >
+              Add a skill to learn
+            </RouterLink>
           </section>
         </div>
       </div>
@@ -252,7 +320,7 @@ function previewChanges() {
             <p class="subtitle">A collection of achievements from your learning experiences.</p>
           </div>
           <span class="achievement-count">
-            {{ skillCards.length }} demo achievements
+            {{ skillCards.length }} achievements
           </span>
         </div>
 
@@ -270,10 +338,11 @@ function previewChanges() {
           You haven't earned any Skill Cards yet.
         </div>
       </section>
+      </template>
     </div>
 
     <!-- Edit Profile modal -->
-    <div v-if="isEditing" class="modal-overlay" @click.self="cancelEditing">
+    <div v-if="isEditing && !loading && !loadError" class="modal-overlay" @click.self="cancelEditing">
       <section
         class="edit-modal"
         role="dialog"
@@ -295,11 +364,7 @@ function previewChanges() {
           </button>
         </div>
 
-        <p class="preview-warning">
-          Preview mode: changes will disappear when you refresh the page.
-        </p>
-
-        <form @submit.prevent="previewChanges">
+        <form @submit.prevent="saveChanges">
           <div class="form-field">
             <label for="profile-name">Display name</label>
             <input
@@ -342,28 +407,6 @@ function previewChanges() {
             <small>Separate each interest with a comma.</small>
           </div>
 
-          <div class="form-field">
-            <label for="profile-teach">Skills I can teach</label>
-            <input
-              id="profile-teach"
-              v-model="draft.skillsTeach"
-              type="text"
-              placeholder="Tennis, Photography"
-            />
-            <small>Separate each skill with a comma.</small>
-          </div>
-
-          <div class="form-field">
-            <label for="profile-learn">Skills I want to learn</label>
-            <input
-              id="profile-learn"
-              v-model="draft.skillsLearn"
-              type="text"
-              placeholder="Guitar, Web Development"
-            />
-            <small>Separate each skill with a comma.</small>
-          </div>
-
           <p v-if="formError" class="form-error" role="alert">
             {{ formError }}
           </p>
@@ -372,8 +415,8 @@ function previewChanges() {
             <button type="button" class="cancel-button" @click="cancelEditing">
               Cancel
             </button>
-            <button type="submit" class="save-button">
-              Apply Preview
+            <button type="submit" class="save-button" :disabled="isSaving">
+              {{ isSaving ? 'Saving...' : 'Save Profile' }}
             </button>
           </div>
         </form>
@@ -420,16 +463,6 @@ function previewChanges() {
 .subtitle {
   margin: 0;
   font-size: 14px;
-}
-
-.demo-label {
-  background: #fff3d6;
-  color: #89651e;
-  border: 1px solid #ead6a5;
-  padding: 8px 12px;
-  border-radius: 30px;
-  font-size: 12px;
-  font-weight: 600;
 }
 
 .profile-hero {
@@ -530,6 +563,39 @@ function previewChanges() {
   background: #fffaf0;
   color: #756043;
   border: 1px solid #e8dcc5;
+}
+
+.skills-panel {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.skill-action-button {
+  display: inline-block;
+  margin-top: 20px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  padding: 10px 15px;
+  font-weight: 650;
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.teach-action {
+  background: #e8f1e8;
+  border-color: #c8ddc8;
+  color: #355d3d;
+}
+
+.learn-action {
+  background: #e8eff5;
+  border-color: #cbd9e5;
+  color: #36546d;
+}
+
+.skill-action-button:hover {
+  filter: brightness(0.96);
 }
 
 .credits-card {
@@ -696,14 +762,6 @@ function previewChanges() {
   font-size: 30px;
   color: #786b5a;
   cursor: pointer;
-}
-
-.preview-warning {
-  padding: 11px 13px;
-  border-radius: 9px;
-  background: #fff3d6;
-  color: #866323;
-  font-size: 12px;
 }
 
 .form-field {

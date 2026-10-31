@@ -8,11 +8,13 @@ import { getMe } from '../services/api'
 const router = useRouter()
 const user = ref(null)
 const credits = ref(0)
+const displayName = ref('Profile')
 
 async function loadProfile() {
   try {
     const profile = await getMe()
     credits.value = profile.credits
+    displayName.value = profile.name?.trim() || 'Profile'
   } catch (error) {
     console.error('Could not load profile:', error.message)
   }
@@ -21,6 +23,7 @@ async function loadProfile() {
 function handleAuthChange(firebaseUser) {
   if (firebaseUser) {
     user.value = firebaseUser
+    displayName.value = 'Profile'
     loadProfile()
   } else {
     router.push('/login')
@@ -68,12 +71,19 @@ const filteredSkills = computed(() => {
 </script>
 
 <template>
-  <nav class="navbar border-bottom px-3">
+  <nav class="navbar border-bottom px-3 justify-content-between">
     <span class="navbar-brand fw-bold">Kongsi</span>
     <div class="d-flex align-items-center gap-3">
-      <a href="#" class="text-decoration-none text-dark" @click.prevent="goToSessions">My sessions</a>
-      <small v-if="user" class="text-muted d-none d-md-inline">{{ user.email }}</small>
-      <button class="btn btn-sm" @click="logout">Log out</button>
+      <a href="#" class="text-decoration-none text-dark" @click.prevent="goToSessions">My Sessions</a>
+      <button
+        v-if="user"
+        type="button"
+        class="btn btn-link text-dark p-0 text-decoration-none"
+        @click="router.push('/profile')"
+      >
+        {{ displayName }}
+      </button>
+      <button class="btn btn-sm" @click="logout">Log Out</button>
     </div>
   </nav>
 
