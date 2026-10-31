@@ -7,39 +7,40 @@ export async function DupeExist(collection, fieldName, value) {
         
         return !userExist.empty;
 }
-export async function getAllDocs(colName) {
-    fb.getDocs(fb.collection(db, colName))
-    .then((res) => {
-        allDoc.forEach((a) => {console.log(a.data())}); 
-    })
+export function getAllDocs(colName) {
+    return fb.getDocs(fb.collection(db, colName))
+    .then((res) => 
+        res.docs.map((d) => ({ id: d.id, ...d.data() }))
+        
+    )
     .catch((err) => {
-        console.log(error);
+        console.log(err);
+        return [];
     })
-  
-    
+     
 }
-export async function findDocWhereEquals(col, field, value) {
-    fb.getDoc(fb.query(fb.collection(db,col),fb.where(field,'==',value)))
-    .then(res => {
-        return {status: true, docs: res}
-    })
+export function findDocWhereEquals(col, field, value) {
+    return fb.getDoc(fb.query(fb.collection(db,col),fb.where(field,'==',value)))
+    .then(res => (
+        {status: true, docs: res.docs.map((d) => ({ id: d.id, ...d.data() }))}
+    ))
     .catch(err => {
         console.log("findDocsWhereEquals failed");
         return {status: false, error: err }
     })
 }
-export async function findDocsWhereEquals(col, field, value) {
-    fb.getDocs(fb.query(fb.collection(db,col),fb.where(field,'==',value)))
-    .then(res => {
-        return {status: true, docs: res}
-    })
+export function findDocsWhereEquals(col, field, value) {
+    return fb.getDocs(fb.query(fb.collection(db,col),fb.where(field,'==',value)))
+    .then(res => (
+       {status: true, docs: res.docs.map((d) => ({ id: d.id, ...d.data() }))}
+    ))
     .catch(err => {
         console.log("findDocsWhereEquals failed");
         return {status: false, error: err }
     })
 }
 
-export async function addDoc(col, doc) {
+export function addDoc(col, doc) {
     fb.addDoc(fb.collection(db,col), doc)
     .then(res => {
         return {status: true, id: res.id}
@@ -49,7 +50,7 @@ export async function addDoc(col, doc) {
     })
 }
 
-export async function addDocID(col, doc, id) {
+export function addDocID(col, doc, id) {
     fb.setDoc(fb.doc(db,col,id),doc)
     .then(res => {
         return {status: true, id: res.id}

@@ -124,8 +124,8 @@ async function saveChanges() {
     return
   }
 
-  if (name.length > 60) {
-    formError.value = 'Your name must be 60 characters or fewer.'
+  if (name.length > 100) {
+    formError.value = 'Your name must be 100 characters or fewer.'
     return
   }
 

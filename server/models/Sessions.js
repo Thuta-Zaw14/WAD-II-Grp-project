@@ -1,7 +1,6 @@
 
 
-import Review from './Review';
-import Session from './Session';
+
 import db from './db';
 import * as fb from 'firebase/firestore';
 import * as dbQuery from  './dbQuery';

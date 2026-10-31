@@ -2,13 +2,13 @@
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { onAuthStateChanged, signOut } from 'firebase/auth'
-import L from 'leaflet'
+import L, { CRS } from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import { auth } from '../firebase'
 import { getMe } from '../services/api'
 import SkillSearch from '../components/SkillSearch.vue'
 import { matches } from '../searchUtils'
-
+import * as dbq from '../../server/models/dbQuery'
 const router = useRouter()
 const user = ref(null)
 const credits = ref(0)
@@ -56,22 +56,94 @@ function makeSlots() {
 }
 
 // "place" is a public meeting spot, not the coach's home
-const skills = ref([
-  { id: 1, skill: 'Tennis', teacher: 'Alex T.', category: 'Sports', place: 'Jurong East Sports Hall', region: 'West', lat: 1.3331, lng: 103.7424 },
-  { id: 2, skill: 'Videography', teacher: 'Mei L.', category: 'Creative', place: 'Our Tampines Hub', region: 'East', lat: 1.3547, lng: 103.94 },
-  { id: 3, skill: 'Guitar basics', teacher: 'Daniel K.', category: 'Music', place: 'Somerset Library', region: 'Central', lat: 1.3004, lng: 103.839 },
-  { id: 4, skill: 'Python intro', teacher: 'Sara R.', category: 'Tech', place: 'Woodlands Regional Library', region: 'North', lat: 1.437, lng: 103.7865 },
-  { id: 5, skill: 'Photo editing', teacher: 'Jun W.', category: 'Creative', place: 'Bugis Junction', region: 'Central', lat: 1.3, lng: 103.856 },
-  { id: 6, skill: 'Basketball', teacher: 'Chris P.', category: 'Sports', place: 'Bedok Community Club', region: 'East', lat: 1.324, lng: 103.93 },
-  { id: 7, skill: 'Tennis', teacher: 'Priya N.', category: 'Sports', place: 'Toa Payoh Sports Hall', region: 'Central', lat: 1.3343, lng: 103.8563 },
-  { id: 8, skill: 'Tennis', teacher: 'Marcus L.', category: 'Sports', place: 'Bishan Community Club', region: 'Central', lat: 1.3526, lng: 103.8352 },
-  { id: 9, skill: 'Python intro', teacher: 'Wei H.', category: 'Tech', place: 'Jurong Regional Library', region: 'West', lat: 1.3396, lng: 103.7066 },
+const skills = ref([]);
+const skillss = ref([
+  { 
+    id: 1,
+    description: 'Lorem ipsum dolor sit amet, consectetur adipiscing elit. Nunc aliquam ultricies commodo. Vestibulum tincidunt, leo mollis elementum mattis, urna nisl pretium dui, in facilisis ipsum magna quis ligula. Integer non urna sed turpis iaculis rutrum ut vel urna. Nullam congue diam at sapien maximus sodales. Nulla eu enim sit amet est posuere tempus.',
+    skill: 'Tennis',
+    teacher: 'Alex T.',
+    category: 'Sports',
+    place: 'Jurong East Sports Hall',
+    region: 'West',
+    lat: 1.3331, lng: 103.7424 
+  },
+  { 
+    id: 2,
+    description: 'Lorem ipsum dolor sit amet, consectetur adipiscing elit. Nunc aliquam ultricies commodo. Vestibulum tincidunt, leo mollis elementum mattis, urna nisl pretium dui, in facilisis ipsum magna quis ligula. Integer non urna sed turpis iaculis rutrum ut vel urna. Nullam congue diam at sapien maximus sodales. Nulla eu enim sit amet est posuere tempus.',
+    skill: 'Videography',
+    teacher: 'Mei L.',
+    category: 'Creative',
+    place: 'Our Tampines Hub',
+    region: 'East',
+    lat: 1.3547, lng: 103.9421 
+  },
+  { 
+    id: 3,
+    description: 'Lorem ipsum dolor sit amet, consectetur adipiscing elit. Nunc aliquam ultricies commodo. Vestibulum tincidunt, leo mollis elementum mattis, urna nisl pretium dui, in facilisis ipsum magna quis ligula. Integer non urna sed turpis iaculis rutrum ut vel urna. Nullam congue diam at sapien maximus sodales. Nulla eu enim sit amet est posuere tempus.',
+    skill: 'Guitar basics',
+    teacher: 'Daniel K.',
+    category: 'Music',
+    place: 'Somerset Library',
+    region: 'Central',
+    lat: 1.3004, lng: 103.839
+  },
+  { 
+    id: 4,
+    description: 'Lorem ipsum dolor sit amet, consectetur adipiscing elit. Nunc aliquam ultricies commodo. Vestibulum tincidunt, leo mollis elementum mattis, urna nisl pretium dui, in facilisis ipsum magna quis ligula. Integer non urna sed turpis iaculis rutrum ut vel urna. Nullam congue diam at sapien maximus sodales. Nulla eu enim sit amet est posuere tempus.',
+    skill: 'Python intro',
+    teacher: 'Sara R.',
+    category: 'Tech',
+    place: 'Woodlands Regional Library',
+    region: 'North',
+    lat: 1.437, lng: 103.7865 
+  },
+  { 
+    id: 5,
+    skill: 'Photo editing',
+    teacher: 'Jun W.',
+    category: 'Creative',
+    place: 'Bugis Junction',
+    region: 'Central',
+    lat: 1.3, lng: 103.856 
+  },
+  { 
+    id: 6,
+    skill: 'Basketball',
+    teacher: 'Chris P.', 
+    ategory: 'Sports',
+    place: 'Bedok Community Club',
+    region: 'East',
+    lat: 1.324, lng: 103.93 
+  },
+  { 
+    id: 7,
+    skill: 'Tennis',
+    teacher: 'Priya N.',
+    category: 'Sports',
+    place: 'Toa Payoh Sports Hall',
+    region: 'Central',
+    lat: 1.3343, lng: 103.8563
+  },
+  { id: 8,
+    skill: 'Tennis',
+    teacher: 'Marcus L.',
+    category: 'Sports',
+    place: 'Bishan Community Club',
+    region: 'Central',
+    lat: 1.3526, lng: 103.8352 
+  },
+  { id: 9,
+    skill: 'Python intro',
+    teacher: 'Wei H.',
+    category: 'Tech',
+    place: 'Jurong Regional Library',
+    region: 'West',
+    lat: 1.3396, lng: 103.7066
+  },
 ])
 
-// Every skill gets its own list of time slots
-for (const s of skills.value) {
-  s.slots = makeSlots()
-}
+
 
 // ---------- Filters ----------
 const search = ref('')
@@ -104,22 +176,20 @@ function getRegion(lat, lng) {
 
 // Straight-line distance in km. 1 degree is about 111 km (close enough for Singapore)
 function distanceKm(from, to) {
-  const dLat = to.lat - from.lat
-  const dLng = to.lng - from.lng
-  return Math.sqrt(dLat * dLat + dLng * dLng) * 111
+  return map.distance(from,to);
 }
 
 function findMe() {
   locationError.value = ''
   navigator.geolocation.getCurrentPosition(
     (pos) => {
-      const lat = pos.coords.latitude
-      const lng = pos.coords.longitude
-      userPos.value = { lat, lng }
-      userRegion.value = getRegion(lat, lng)
+      const latitude = pos.coords.latitude
+      const longtitude = pos.coords.longitude
+      userPos.value = { latitude, longtitude }
+      userRegion.value = getRegion(latitude, longtitude)
 
       if (youMarker) youMarker.remove()
-      youMarker = L.circleMarker([lat, lng], { radius: 8, color: 'blue' }).addTo(map)
+      youMarker = L.circleMarker([latitude, longtitude], { radius: 8, color: 'blue' }).addTo(map)
     },
     () => {
       locationError.value = 'Could not get your location. Allow location access in your browser.'
@@ -144,7 +214,7 @@ const filteredSkills = computed(() => {
     const regionMatches = selectedRegion.value === 'All' || item.region === selectedRegion.value
 
     if (textMatches && categoryMatches && regionMatches) {
-      const distance = userPos.value ? distanceKm(userPos.value, item) : null
+      const distance = userPos.value ? distanceKm(userPos.value, item.latlng) : null
       results.push({ ...item, distance })
     }
   }
@@ -166,7 +236,7 @@ function drawPins() {
   pinLayer.clearLayers()
 
   for (const s of filteredSkills.value) {
-    const pin = L.circleMarker([s.lat, s.lng], {
+    const pin = L.circleMarker(L.latLng(s.latlng.latitude,s.latlng.longitude), {
       radius: 10,
       color: 'white',
       fillColor: categoryColors[s.category],
@@ -181,13 +251,18 @@ function drawPins() {
 // Redraw the pins whenever the list changes
 watch(filteredSkills, drawPins)
 
-onMounted(() => {
+onMounted(async () => {
   map = L.map(mapEl.value).setView([1.3521, 103.8198], 11) // middle of Singapore
   L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
     attribution: '&copy; OpenStreetMap contributors',
   }).addTo(map)
   pinLayer = L.layerGroup().addTo(map)
   drawPins()
+  skills.value = await dbq.getAllDocs('sessions');
+  // Every skill gets its own list of time slots
+  for (const s of skills.value) {
+    s.timeslot = makeSlots()
+  }
 })
 
 onUnmounted(() => {
@@ -216,13 +291,16 @@ const slotsByDate = computed(() => {
   const groups = {}
   if (!selectedSkill.value) return groups
 
-  for (const slot of selectedSkill.value.slots) {
+  for (const slot of selectedSkill.value.timeslot) {
+    console.log(slot)
     if (!groups[slot.date]) groups[slot.date] = []
     groups[slot.date].push(slot)
   }
   return groups
 })
-
+function focusMe(a) {
+  map.flyTo(L.latLng(a.latitude,a.longitude),15,{duration:1});
+}
 function resetFilters() {
   selectedCategory.value = 'All'
   selectedRegion.value = 'All'
@@ -316,12 +394,12 @@ function goToInsights() {
                 <span class="badge text-bg-light">
                   <span class="dot" :style="{ background: categoryColors[s.category] }"></span>{{ s.category }}
                 </span>
-                <small v-if="s.distance !== null" class="text-muted">{{ s.distance.toFixed(1) }} km away</small>
+                <small v-if="s.distance !== null" class="text-muted">{{ s.distance.toFixed(2) }}m away</small>
               </div>
               <h2 class="h5">{{ s.skill }}</h2>
               <p class="text-muted mb-1">Taught by {{ s.teacher }}</p>
               <p class="text-muted small mb-3">Meets at {{ s.place }} ({{ s.region }})</p>
-              <button class="btn btn-brand w-100" @click="openBooking(s)">Request session</button>
+              <button class="btn btn-brand w-100" @click="openBooking(s),  focusMe(s.latlng)" >Request session</button>
             </div>
           </div>
 
@@ -340,7 +418,7 @@ function goToInsights() {
     style="background: rgba(0, 0, 0, 0.5)"
     @click.self="closeBooking"
   >
-    <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable">
+    <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable modal-xl">
       <div class="modal-content">
         <div class="modal-header banner">
           <div>
@@ -351,6 +429,10 @@ function goToInsights() {
         </div>
 
         <div class="modal-body">
+          <dl class="row">
+            <dt class="col-3">Descrption</dt>
+            <dd>{{ selectedSkill.description }}</dd>
+          </dl>
           <p class="text-muted">Pick a time that suits you.</p>
 
           <div v-for="(daySlots, date) in slotsByDate" :key="date" class="mb-3">
@@ -369,7 +451,7 @@ function goToInsights() {
             </div>
           </div>
 
-          <p v-if="selectedSkill.slots.length === 0" class="text-muted">
+          <p v-if="selectedSkill.timeslot.length === 0" class="text-muted">
             This coach has no available times yet.
           </p>
         </div>

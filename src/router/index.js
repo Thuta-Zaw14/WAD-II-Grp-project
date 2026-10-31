@@ -5,6 +5,7 @@ import SessionsPage from '../view/SessionsPage.vue'
 import ProfilePage from '../view/ProfilePage.vue'
 import TeachSkillPage from '../component/TeachSkillPage.vue'
 import LearnSkillPage from '../component/LearnSkillPage.vue'
+import SessionPage from '@/view/SessionPage.vue'
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -17,7 +18,8 @@ const router = createRouter({
     { path: '/skills/teach/new', component: TeachSkillPage },
     { path: '/skills/teach/:id/edit', component: TeachSkillPage, props: true },
     { path: '/skills/learn/new', component: LearnSkillPage },
-    { path: '/skills/learn/:id/edit', component: LearnSkillPage, props: true }
+    { path: '/skills/learn/:id/edit', component: LearnSkillPage, props: true },
+    { path: '/session', component: SessionPage}
   ],
 })
 
