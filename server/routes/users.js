@@ -2,15 +2,39 @@ import express from 'express'
 import { db } from '../config/firebaseAdmin.js'
 import { verifyToken } from '../middleware/verifyToken.js'
 import { addDocID, findDocsWhereEquals } from '../models/dbQuery.js'
-import { skillList, regionList } from '../config/skills.js'
+import { categoryList, regionList } from '../config/skills.js'
 
 const router = express.Router()
 
-// the names of the skills people are allowed to pick
-const skillNames = []
-for (const skill of skillList) {
-  skillNames.push(skill.name)
+const maxSkills = 15 // per list
+
+// Checks one list of skills: [{ name: 'Badminton', category: 'Sports' }, ...]
+// The name is free text, but the category must be one of our genres.
+function findSkillProblem(field, list) {
+  if (!Array.isArray(list)) {
+    return field + ' must be a list.'
+  }
+  if (list.length > maxSkills) {
+    return 'You can add up to ' + maxSkills + ' skills in each list.'
+  }
+  for (const skill of list) {
+    if (typeof skill !== 'object' || skill === null) {
+      return 'Each skill needs a name and a genre.'
+    }
+    if (typeof skill.name !== 'string' || skill.name.trim() === '') {
+      return 'Each skill needs a name.'
+    }
+    if (skill.name.trim().length > 40) {
+      return 'A skill name must be 40 characters or fewer.'
+    }
+    if (!categoryList.includes(skill.category)) {
+      return 'Please pick a genre from the list for ' + skill.name.trim() + '.'
+    }
+  }
+  return ''
 }
+
+
 
 // Checks the data sent by the profile form. Returns an error message,
 // or '' if everything is fine. The browser checks too, but anyone can skip
@@ -39,13 +63,9 @@ function findProblem(body) {
 
   for (const field of ['skillsTeach', 'skillsLearn']) {
     if (body[field] !== undefined) {
-      if (!Array.isArray(body[field])) {
-        return field + ' must be a list.'
-      }
-      for (const skill of body[field]) {
-        if (!skillNames.includes(skill)) {
-          return 'Unknown skill: ' + skill
-        }
+      const problem = findSkillProblem(field, body[field])
+      if (problem !== '') {
+        return problem
       }
     }
   }
@@ -53,12 +73,18 @@ function findProblem(body) {
   return ''
 }
 
-// remove repeated skills, keep the order
-function removeDuplicates(list) {
+// Tidy a list of skills: trim the names, squeeze extra spaces, and drop repeats
+// ("Tennis" and "tennis" count as the same skill - the first one is kept).
+// Only name and category are kept, whatever else the browser sent.
+function cleanSkills(list) {
   const result = []
-  for (const item of list) {
-    if (!result.includes(item)) {
-      result.push(item)
+  const seen = []
+  for (const skill of list) {
+    const name = skill.name.trim().split(/\s+/).join(' ')
+    const key = name.toLowerCase()
+    if (!seen.includes(key)) {
+      seen.push(key)
+      result.push({ name: name, category: skill.category })
     }
   }
   return result
@@ -116,8 +142,8 @@ router.patch('/me', verifyToken, async (req, res) => {
   if (req.body.name !== undefined) changes.name = req.body.name.trim()
   if (req.body.bio !== undefined) changes.bio = req.body.bio.trim()
   if (req.body.region !== undefined) changes.region = req.body.region
-  if (req.body.skillsTeach !== undefined) changes.skillsTeach = removeDuplicates(req.body.skillsTeach)
-  if (req.body.skillsLearn !== undefined) changes.skillsLearn = removeDuplicates(req.body.skillsLearn)
+  if (req.body.skillsTeach !== undefined) changes.skillsTeach = cleanSkills(req.body.skillsTeach)
+  if (req.body.skillsLearn !== undefined) changes.skillsLearn = cleanSkills(req.body.skillsLearn)
 
   if (Object.keys(changes).length === 0) {
     return res.status(400).json({ error: 'Nothing to update.' })

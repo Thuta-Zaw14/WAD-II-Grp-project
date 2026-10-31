@@ -5,29 +5,29 @@ import { onAuthStateChanged, signOut } from 'firebase/auth'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import { auth } from '../firebase'
-import { getMe } from '../services/api'
+import { useOffersStore } from '../stores/offers'
+import { useProfileStore } from '../stores/profile'
 import SkillSearch from '../components/SkillSearch.vue'
 import { matches } from '../searchUtils'
 
 const router = useRouter()
+const offersStore = useOffersStore()
+const profileStore = useProfileStore()
 const user = ref(null)
-const credits = ref(0)
+const credits = computed(() => profileStore.credits)
 
 // ---------- Login ----------
-async function loadProfile() {
-  try {
-    const profile = await getMe()
-    credits.value = profile.credits
-  } catch (error) {
-    console.error('Could not load profile:', error.message)
-  }
-}
-
 function handleAuthChange(firebaseUser) {
   if (firebaseUser) {
     user.value = firebaseUser
-    loadProfile()
+    profileStore.fetchProfile()
+
+    // only fetch if the store does not have the offers yet
+    if (offersStore.offers.length === 0) {
+      offersStore.fetchOffers()
+    }
   } else {
+    profileStore.reset()
     router.push('/login')
   }
 }
@@ -42,33 +42,12 @@ function goToSessions() {
   router.push('/sessions')
 }
 
-// ---------- Fake data for now ----------
-function makeSlots() {
-  return [
-    { id: 1, date: '2026-10-22', time: '10:00', booked: false },
-    { id: 2, date: '2026-10-22', time: '14:00', booked: true },
-    { id: 3, date: '2026-10-24', time: '09:00', booked: false },
-    { id: 4, date: '2026-10-25', time: '16:00', booked: false },
-  ]
+function goToProfile() {
+  router.push('/profile')
 }
 
-// "place" is a public meeting spot, not the coach's home
-const skills = ref([
-  { id: 1, skill: 'Tennis', teacher: 'Alex T.', category: 'Sports', place: 'Jurong East Sports Hall', region: 'West', lat: 1.3331, lng: 103.7424 },
-  { id: 2, skill: 'Videography', teacher: 'Mei L.', category: 'Creative', place: 'Our Tampines Hub', region: 'East', lat: 1.3547, lng: 103.94 },
-  { id: 3, skill: 'Guitar basics', teacher: 'Daniel K.', category: 'Music', place: 'Somerset Library', region: 'Central', lat: 1.3004, lng: 103.839 },
-  { id: 4, skill: 'Python intro', teacher: 'Sara R.', category: 'Tech', place: 'Woodlands Regional Library', region: 'North', lat: 1.437, lng: 103.7865 },
-  { id: 5, skill: 'Photo editing', teacher: 'Jun W.', category: 'Creative', place: 'Bugis Junction', region: 'Central', lat: 1.3, lng: 103.856 },
-  { id: 6, skill: 'Basketball', teacher: 'Chris P.', category: 'Sports', place: 'Bedok Community Club', region: 'East', lat: 1.324, lng: 103.93 },
-  { id: 7, skill: 'Tennis', teacher: 'Priya N.', category: 'Sports', place: 'Toa Payoh Sports Hall', region: 'Central', lat: 1.3343, lng: 103.8563 },
-  { id: 8, skill: 'Tennis', teacher: 'Marcus L.', category: 'Sports', place: 'Bishan Community Club', region: 'Central', lat: 1.3526, lng: 103.8352 },
-  { id: 9, skill: 'Python intro', teacher: 'Wei H.', category: 'Tech', place: 'Jurong Regional Library', region: 'West', lat: 1.3396, lng: 103.7066 },
-])
-
-// Every skill gets its own list of time slots
-for (const s of skills.value) {
-  s.slots = makeSlots()
-}
+// ---------- Skills (loaded from Firestore through the offers store) ----------
+const skills = computed(() => offersStore.offers)
 
 // ---------- Filters ----------
 const search = ref('')
@@ -135,7 +114,7 @@ const filteredSkills = computed(() => {
   const results = []
 
   for (const item of skills.value) {
-    const textMatches = matches(search.value, [item.skill, item.teacher, item.category])
+    const textMatches = [item.skill, item.teacherName, item.category]
     const categoryMatches =
       selectedCategory.value === 'All' || item.category === selectedCategory.value
     const regionMatches = selectedRegion.value === 'All' || item.region === selectedRegion.value
@@ -160,6 +139,7 @@ let map = null
 let pinLayer = null
 
 function drawPins() {
+  if (!pinLayer) return
   pinLayer.clearLayers()
 
   for (const s of filteredSkills.value) {
@@ -235,6 +215,7 @@ function goToInsights() {
     <span class="navbar-brand fw-bold">Kongsi</span>
     <div class="d-flex align-items-center gap-3">
       <a href="#" class="text-decoration-none text-dark" @click.prevent="goToSessions">My sessions</a>
+      <a href="#" class="text-decoration-none text-dark" @click.prevent="goToProfile">Profile</a>
       <a href="#" class="text-decoration-none text-dark" @click.prevent="goToInsights">Insights</a>
       <small v-if="user" class="text-muted d-none d-md-inline">{{ user.email }}</small>
       <button class="btn btn-sm" @click="logout">Log out</button>
@@ -316,13 +297,15 @@ function goToInsights() {
                 <small v-if="s.distance !== null" class="text-muted">{{ s.distance.toFixed(1) }} km away</small>
               </div>
               <h2 class="h5">{{ s.skill }}</h2>
-              <p class="text-muted mb-1">Taught by {{ s.teacher }}</p>
+              <p class="text-muted mb-1">Taught by {{ s.teacherName }}</p>
               <p class="text-muted small mb-3">Meets at {{ s.place }} ({{ s.region }})</p>
               <button class="btn btn-brand w-100" @click="openBooking(s)">Request session</button>
             </div>
           </div>
 
-          <p v-if="filteredSkills.length === 0" class="text-muted">
+          <p v-if="offersStore.loading" class="text-muted">Loading skills...</p>
+          <p v-else-if="offersStore.error" class="text-danger">{{ offersStore.error }}</p>
+          <p v-else-if="filteredSkills.length === 0" class="text-muted">
             No skills match your filters. Try a different genre or region.
           </p>
         </div>
@@ -342,7 +325,7 @@ function goToInsights() {
         <div class="modal-header banner">
           <div>
             <h2 class="h5 mb-0">{{ selectedSkill.skill }}</h2>
-            <small>Coach: {{ selectedSkill.teacher }}</small>
+            <small>Coach: {{ selectedSkill.teacherName }}</small>
           </div>
           <button class="btn-close" @click="closeBooking"></button>
         </div>

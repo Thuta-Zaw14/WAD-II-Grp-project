@@ -3,6 +3,7 @@ import LoginPage from '../view/LoginPage.vue'
 import HomePage from '../view/HomePage.vue'
 import SessionsPage from '../view/SessionsPage.vue'
 import InsightsPage from '@/view/Insightspage.vue'
+import ProfilePage from '../view/ProfilePage.vue'
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -12,6 +13,7 @@ const router = createRouter({
     { path: '/home', component: HomePage },
     { path: '/sessions', component: SessionsPage },
     { path: '/insights', component: InsightsPage },
+    { path: '/profile', component: ProfilePage },
   ],
 })
 

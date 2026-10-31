@@ -1,0 +1,18 @@
+:root {
+  --k-bg: #faf9f6;
+  --k-surface: #fffefa;
+  --k-surface-alt: #f3ecdc;
+  --k-border: #eae2d4;
+  --k-text: #44392b;
+  --k-muted: #897f71;
+  --k-accent: #5c4932;
+  --k-accent-hover: #433321;
+  --k-on-accent: #ffffff;
+  --k-danger: #a12626;
+  --k-radius: 16px;
+
+  --k-cat-sports: #d9822b;
+  --k-cat-creative: #8e5ea2;
+  --k-cat-music: #3b8ea5;
+  --k-cat-tech: #4a7c59;
+}
