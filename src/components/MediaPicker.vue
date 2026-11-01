@@ -96,7 +96,7 @@ onBeforeUnmount(() =>
   height: 96px;
   object-fit: cover;
   border-radius: 8px;
-  background: #eee;
+  background: var(--k-surface-alt);
 }
 .remove-btn {
   position: absolute;

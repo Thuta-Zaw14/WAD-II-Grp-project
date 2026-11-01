@@ -4,6 +4,9 @@ import { useRouter } from 'vue-router'
 import { auth } from '../firebase'
 import { getDiscussion, sendPost, removePost, errorText } from '../services/api'
 import ReportBox from '../components/ReportBox.vue'
+import NavBar from '../components/NavBar.vue'
+import UserAvatar from '../components/UserAvatar.vue'
+import LoadingText from '../components/LoadingText.vue'
 
 // The public discussion of one course, at /discussion/<course id>. Everyone who is signed in can
 // read it and write in it. The page asks the server for new posts every few seconds (the browser
@@ -160,62 +163,67 @@ onUnmounted(stopChecking)
 </script>
 
 <template>
-  <nav class="navbar border-bottom px-3">
-    <span class="navbar-brand fw-bold">Kongsi</span>
-    <span class="text-dark" role="button" @click="router.push('/home')">Back to courses</span>
-  </nav>
+  <NavBar />
 
   <div class="container py-4 discussion-container">
-    <div class="p-4 mb-3 rounded banner">
+    <a href="#" class="back-link small" @click.prevent="router.push('/home')">&larr; Back to courses</a>
+
+    <div class="p-4 mt-2 mb-3 banner">
       <h1 class="h4 mb-1">Questions &amp; discussion</h1>
       <p v-if="course" class="mb-0">{{ course.title }} · taught by {{ course.teacherName }}</p>
       <p v-else class="mb-0">Everyone on Kongsi can read and write here.</p>
       <p v-if="course && course.isMine" class="small mb-0 mt-1">This is your course: you can remove any message here.</p>
     </div>
 
-    <div v-if="ready" class="border rounded bg-white">
+    <div v-if="ready" class="k-card overflow-hidden">
       <p v-if="blocked" class="small text-danger p-3 mb-0">{{ error }}</p>
 
-      <div v-else ref="listEl" class="post-list p-2">
-        <p v-if="loading" class="small text-muted mb-0">Loading the discussion...</p>
-        <p v-else-if="posts.length === 0" class="small text-muted mb-0">Nobody has written here yet. Ask the first question!</p>
+      <div v-else ref="listEl" class="post-list p-3">
+        <LoadingText v-if="loading" class="small mb-0" text="Loading the discussion..." />
+        <p v-else-if="posts.length === 0" class="text-center text-muted my-4">
+          <span class="d-block fs-3" aria-hidden="true">💬</span>
+          Nobody has written here yet. Ask the first question!
+        </p>
         <p v-if="!loading && earlier > 0" class="small text-muted text-center">
           {{ earlier }} earlier message{{ earlier === 1 ? '' : 's' }} not shown.
         </p>
 
-        <div v-for="p in posts" :key="p.n" class="post mb-2 rounded px-2 py-1" :class="{ mine: p.mine, gone: p.removed }">
-          <div class="d-flex justify-content-between align-items-start gap-2">
-            <div class="small text-muted">
-              <strong class="text-dark">{{ p.mine ? 'You' : p.authorName }}</strong>
-              <span v-if="p.isTeacher" class="badge text-bg-dark ms-1">Teacher</span>
-              · {{ formatTime(p.createdAt) }}
+        <div v-for="p in posts" :key="p.n" class="post d-flex gap-2 mb-2 p-2" :class="{ mine: p.mine, gone: p.removed }">
+          <UserAvatar :name="p.authorName" />
+          <div class="flex-grow-1">
+            <div class="d-flex justify-content-between align-items-start gap-2">
+              <div class="small text-muted">
+                <strong class="text-dark">{{ p.mine ? 'You' : p.authorName }}</strong>
+                <span v-if="p.isTeacher" class="badge text-bg-dark ms-1">Teacher</span>
+                · {{ formatTime(p.createdAt) }}
+              </div>
+              <div v-if="!p.removed" class="small flex-shrink-0">
+                <template v-if="!p.mine">
+                  <span v-if="reportedNs.includes(p.n)" class="text-muted">Reported</span>
+                  <button v-else type="button" class="link-button" @click="startReport(p.n)">Report</button>
+                </template>
+                <button v-if="p.canDelete" type="button" class="link-button ms-2" @click="remove(p)">Remove</button>
+              </div>
             </div>
-            <div v-if="!p.removed" class="small flex-shrink-0">
-              <template v-if="!p.mine">
-                <span v-if="reportedNs.includes(p.n)" class="text-muted">Reported</span>
-                <button v-else type="button" class="link-button" @click="startReport(p.n)">Report</button>
-              </template>
-              <button v-if="p.canDelete" type="button" class="link-button ms-2" @click="remove(p)">Remove</button>
-            </div>
+
+            <div v-if="p.removed" class="small fst-italic text-muted">{{ removedText(p) }}</div>
+            <div v-else class="text">{{ p.text }}</div>
+
+            <ReportBox
+              v-if="reportingN === p.n"
+              kind="public"
+              :container-id="props.id"
+              :n="p.n"
+              @reported="reportedNs.push(p.n)"
+              @close="reportingN = 0"
+            />
           </div>
-
-          <div v-if="p.removed" class="small fst-italic text-muted">{{ removedText(p) }}</div>
-          <div v-else class="text">{{ p.text }}</div>
-
-          <ReportBox
-            v-if="reportingN === p.n"
-            kind="public"
-            :container-id="props.id"
-            :n="p.n"
-            @reported="reportedNs.push(p.n)"
-            @close="reportingN = 0"
-          />
         </div>
       </div>
 
       <p v-if="error && !blocked" class="small text-danger px-2 mb-1">{{ error }}</p>
 
-      <form v-if="open && !blocked" class="border-top p-2" @submit.prevent="send">
+      <form v-if="open && !blocked" class="composer border-top p-2" @submit.prevent="send">
         <textarea
           v-model="text"
           class="form-control form-control-sm mb-1"
@@ -229,15 +237,15 @@ onUnmounted(stopChecking)
           <button type="submit" class="btn btn-sm btn-brand" :disabled="sending || text.trim() === ''">Post</button>
         </div>
       </form>
-      <p v-else-if="!blocked" class="small text-muted border-top p-2 mb-0">This discussion is full, so nobody can add to it.</p>
+      <p v-else-if="!blocked" class="small text-muted border-top p-3 mb-0">This discussion is full, so nobody can add to it.</p>
     </div>
   </div>
 </template>
 
 <style scoped>
-.banner {
-  background: #f5f0e1;
-  color: #4a3f2a;
+.back-link {
+  color: var(--k-muted);
+  text-decoration: none;
 }
 
 /* a discussion reads better in a column than stretched across a wide screen */
@@ -245,25 +253,29 @@ onUnmounted(stopChecking)
   max-width: 760px;
 }
 
+/* The list grows with the posts, so the box to write in sits right under the last one.
+   Once it is taller than about half the screen it scrolls. */
 .post-list {
-  height: 55vh;
-  min-height: 280px;
+  min-height: 180px;
+  max-height: 55vh;
   overflow-y: auto;
-  background: #fbf8f0;
+  background: var(--k-bg);
 }
 
 .post {
-  background: white;
-  border: 1px solid #e3d9bf;
+  background: var(--k-surface);
+  border: 1px solid var(--k-border);
+  border-radius: 14px;
 }
 
 .post.mine {
-  background: #f1dcc6;
-  border-color: #e3c9aa;
+  background: var(--k-brand-soft);
+  border-color: #e6cdb0;
 }
 
 .post.gone {
-  background: #f3f0e8;
+  background: var(--k-surface-alt);
+  opacity: 0.8;
 }
 
 /* keeps the line breaks the person typed, and wraps very long words */
@@ -272,29 +284,7 @@ onUnmounted(stopChecking)
   overflow-wrap: anywhere;
 }
 
-.link-button {
-  background: none;
-  border: none;
-  padding: 0;
-  color: #9c6e48;
-  text-decoration: underline;
-  font-size: inherit;
-}
-
-.link-button:hover {
-  color: #7a5535;
-}
-
-.btn-brand {
-  background: #b5835a;
-  border-color: #b5835a;
-  color: white;
-  font-weight: 600;
-}
-
-.btn-brand:hover:not(:disabled) {
-  background: #9c6e48;
-  border-color: #9c6e48;
-  color: white;
+.composer {
+  background: var(--k-surface);
 }
 </style>

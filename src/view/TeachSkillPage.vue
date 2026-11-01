@@ -10,11 +10,15 @@ import SkillsBasicsField from '@/components/SkillsBasicsField.vue'
 import MediaPicker from '@/components/MediaPicker.vue'
 import { picturesEnabled } from '@/config'
 import { findTitleProblem } from '@/services/skillRules'
+import NavBar from '@/components/NavBar.vue'
+import LoadingText from '@/components/LoadingText.vue'
+import { useToastStore } from '@/stores/toast'
 
 // The address /teach/:id gives us the id of the course being edited (none = a new course)
 const props = defineProps({ id: { type: String, default: null } })
 const router = useRouter()
 const store = useProfileStore()
+const toast = useToastStore()
 const isEdit = computed(() => !!props.id)
 
 let uid = null
@@ -264,6 +268,7 @@ async function save() {
       await createOffer(data)
     }
 
+    toast.show('Course saved.')
     router.push('/profile')
   } catch (err) {
     await deleteMany(uploaded) // the save failed: do not leave unused files in Storage
@@ -279,6 +284,7 @@ async function remove() {
   try {
     const result = await deleteOffer(props.id)
     await deleteMany(result.removedPaths)
+    toast.show('Course deleted.')
     router.push('/profile')
   } catch (err) {
     error.value = errorText(err)
@@ -287,6 +293,7 @@ async function remove() {
 </script>
 
 <template>
+  <NavBar />
   <main class="container py-4" style="max-width: 760px">
     <button class="btn btn-link px-0 mb-2" @click="router.push('/profile')">
       &larr; Back to profile
@@ -306,7 +313,7 @@ async function remove() {
       </button>
     </div>
 
-    <p v-if="loading" role="status">Loading...</p>
+    <LoadingText v-if="loading" />
     <div v-else-if="blocked" class="alert alert-danger" role="alert">
       {{ error }}
     </div>
@@ -559,18 +566,6 @@ async function remove() {
 </template>
 
 <style scoped>
-.btn-brand {
-  background: #b5835a;
-  border-color: #b5835a;
-  color: white;
-  font-weight: 600;
-}
-.btn-brand:hover {
-  background: #9c6e48;
-  border-color: #9c6e48;
-  color: white;
-}
-
 .slot-input {
   flex: 1 1 9rem;
   min-width: 0;

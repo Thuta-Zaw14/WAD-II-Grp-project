@@ -7,11 +7,15 @@ import { createGoal, updateGoal, deleteGoal, errorText } from '@/services/api'
 import { uploadPending, deleteMany } from '@/services/storage'
 import SkillsBasicsField from '@/components/SkillsBasicsField.vue'
 import { findTitleProblem } from '@/services/skillRules'
+import NavBar from '@/components/NavBar.vue'
+import LoadingText from '@/components/LoadingText.vue'
+import { useToastStore } from '@/stores/toast'
 
 // /learn/:id gives the id of the goal being edited (none = a new one)
 const props = defineProps({ id: { type: String, default: null } })
 const router = useRouter()
 const store = useProfileStore()
+const toast = useToastStore()
 const isEdit = computed(() => !!props.id)
 
 let uid = null
@@ -108,6 +112,7 @@ async function save() {
     } else {
       await createGoal(data)
     }
+    toast.show('Learning goal saved.')
     router.push('/profile')
   } catch (err) {
     await deleteMany(uploaded)
@@ -123,6 +128,7 @@ async function remove() {
   try {
     const result = await deleteGoal(props.id)
     await deleteMany(result.removedPaths)
+    toast.show('Removed from your learning list.')
     router.push('/profile')
   } catch (err) {
     error.value = errorText(err)
@@ -131,6 +137,7 @@ async function remove() {
 </script>
 
 <template>
+  <NavBar />
   <main class="container py-4" style="max-width: 760px">
     <button class="btn btn-link px-0 mb-2" @click="router.push('/profile')">
       &larr; Back to profile
@@ -139,7 +146,7 @@ async function remove() {
       {{ isEdit ? 'Edit skill I want to learn' : 'Add a skill I want to learn' }}
     </h1>
 
-    <p v-if="loading" role="status">Loading...</p>
+    <LoadingText v-if="loading" />
     <div v-else-if="blocked" class="alert alert-danger" role="alert">
       {{ error }}
     </div>
@@ -183,17 +190,3 @@ async function remove() {
     </form>
   </main>
 </template>
-
-<style scoped>
-.btn-brand {
-  background: #b5835a;
-  border-color: #b5835a;
-  color: white;
-  font-weight: 600;
-}
-.btn-brand:hover {
-  background: #9c6e48;
-  border-color: #9c6e48;
-  color: white;
-}
-</style>

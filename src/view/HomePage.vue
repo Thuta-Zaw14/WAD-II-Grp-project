@@ -1,7 +1,7 @@
 <script setup>
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { onAuthStateChanged, signOut } from 'firebase/auth'
+import { onAuthStateChanged } from 'firebase/auth'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import { auth } from '../firebase'
@@ -9,6 +9,11 @@ import { useOffersStore } from '../stores/offers'
 import { useProfileStore } from '../stores/profile'
 import { useBookingsStore } from '../stores/bookings'
 import SkillSearch from '../components/SkillSearch.vue'
+import NavBar from '../components/NavBar.vue'
+import UserAvatar from '../components/UserAvatar.vue'
+import LoadingText from '../components/LoadingText.vue'
+import EmptyState from '../components/EmptyState.vue'
+import heroImg from '../assets/login.jpg'
 import { matches } from '../searchUtils'
 
 const router = useRouter()
@@ -17,6 +22,12 @@ const profileStore = useProfileStore()
 const bookingsStore = useBookingsStore()
 const user = ref(null)
 const credits = computed(() => profileStore.credits)
+
+// "Bob" from "Bob Lim", for the greeting ('' until the profile has a name)
+const firstName = computed(() => {
+  const name = profileStore.profile ? profileStore.profile.name || '' : ''
+  return name.trim().split(' ')[0]
+})
 
 // warnings an admin gave me (shown at the top of the page)
 const warnings = computed(() => {
@@ -44,16 +55,8 @@ function handleAuthChange(firebaseUser) {
 
 const stopListening = onAuthStateChanged(auth, handleAuthChange)
 
-async function logout() {
-  await signOut(auth)
-}
-
 function goToSessions() {
   router.push('/sessions')
-}
-
-function goToProfile() {
-  router.push('/profile')
 }
 
 // the public questions & discussion of a course (anyone can read and write there)
@@ -252,7 +255,7 @@ function chooseSlot(slot) {
 // how a start time button looks
 function slotClass(slot) {
   if (slot.mine) return 'btn-success'
-  if (slot.id === chosenSlotId.value) return 'btn-dark'
+  if (slot.id === chosenSlotId.value) return 'btn-accent'
   if (slot.booked || slot.past) return 'btn-outline-secondary'
   return 'btn-brand'
 }
@@ -302,24 +305,12 @@ const slotsByDate = computed(() => {
 function resetFilters() {
   selectedCategory.value = 'All'
   selectedRegion.value = 'All'
-}
-
-function goToInsights() {
-  router.push('/insights')
+  search.value = ''
 }
 </script>
 
 <template>
-  <nav class="navbar border-bottom px-3">
-    <span class="navbar-brand fw-bold">Kongsi</span>
-    <div class="d-flex align-items-center gap-3">
-      <a href="#" class="text-decoration-none text-dark" @click.prevent="goToSessions">My sessions</a>
-      <a href="#" class="text-decoration-none text-dark" @click.prevent="goToProfile">Profile</a>
-      <a href="#" class="text-decoration-none text-dark" @click.prevent="goToInsights">Insights</a>
-      <small v-if="user" class="text-muted d-none d-md-inline">{{ user.email }}</small>
-      <button class="btn btn-sm" @click="logout">Log out</button>
-    </div>
-  </nav>
+  <NavBar />
 
   <div class="container py-4">
     <!-- e.g. "Your account has been suspended." for a banned person -->
@@ -332,85 +323,100 @@ function goToInsights() {
       </ul>
     </div>
 
-    <div class="p-4 mb-4 rounded banner d-flex justify-content-between align-items-center flex-wrap gap-2">
-      <div>
-        <h1 class="h4 mb-1">Welcome back</h1>
-        <p class="mb-0">Teach a skill, earn credits, and spend them learning something new.</p>
+    <!-- Welcome box, with one main button. The photo is only shown on wider screens. -->
+    <section class="hero mb-4">
+      <div class="hero-text">
+        <p class="eyebrow mb-2">Kongsi skill exchange</p>
+        <h1 class="mb-2">Welcome back{{ firstName ? ', ' + firstName : '' }}</h1>
+        <p class="mb-3">Teach a skill, earn credits, and spend them learning something new.</p>
+        <div class="d-flex align-items-center flex-wrap gap-3">
+          <button class="btn btn-brand px-4" @click="router.push('/teach/new')">Teach a skill</button>
+          <span class="credit-pill">You have {{ credits }} time credit{{ credits === 1 ? '' : 's' }}</span>
+        </div>
       </div>
-      <div class="text-center">
-        <div class="fs-2 fw-bold">{{ credits }}</div>
-        <p>time credits</p>
-      </div>
-    </div>
+      <img :src="heroImg" alt="" class="hero-photo d-none d-md-block" />
+    </section>
 
     <!-- Search and filters -->
-    <SkillSearch v-model="search" :skills="skills" />
+    <div class="k-card p-3 mb-4">
+      <SkillSearch v-model="search" :skills="skills" />
 
-    <div class="mb-2">
-      <span class="me-2 small text-muted">Genre:</span>
-      <span
-        v-for="c in categories"
-        :key="c"
-        class="badge me-1"
-        :class="selectedCategory === c ? 'text-bg-dark' : 'text-bg-light'"
-        role="button"
-        @click="selectedCategory = c"
-      >
-        <span v-if="c !== 'All'" class="dot" :style="{ background: categoryColors[c] }"></span>{{ c }}
-      </span>
+      <div class="d-flex align-items-center flex-wrap gap-2 mb-2">
+        <span class="small text-muted filter-label">Genre</span>
+        <button
+          v-for="c in categories"
+          :key="c"
+          type="button"
+          class="filter"
+          :class="{ active: selectedCategory === c }"
+          @click="selectedCategory = c"
+        >
+          <span v-if="c !== 'All'" class="dot" :style="{ background: categoryColors[c] }"></span>{{ c }}
+        </button>
+      </div>
+
+      <div class="d-flex align-items-center flex-wrap gap-2 mb-2">
+        <span class="small text-muted filter-label">Region</span>
+        <button
+          v-for="r in regions"
+          :key="r"
+          type="button"
+          class="filter"
+          :class="{ active: selectedRegion === r }"
+          @click="selectedRegion = r"
+        >{{ r }}</button>
+      </div>
+
+      <p class="small mb-0">
+        <a v-if="!userPos" href="#" @click.prevent="findMe">Sort by distance from me</a>
+        <template v-else>
+          <span class="text-muted">You're in the {{ userRegion }} region. Closest first.</span>
+          <a href="#" class="ms-2" @click.prevent="clearLocation">Clear</a>
+        </template>
+        <a
+          v-if="selectedCategory !== 'All' || selectedRegion !== 'All'"
+          href="#"
+          class="ms-3"
+          @click.prevent="resetFilters"
+        >Reset filters</a>
+        <span v-if="locationError" class="ms-2 text-danger">{{ locationError }}</span>
+      </p>
     </div>
-
-    <div class="mb-2">
-      <span class="me-2 small text-muted">Region:</span>
-      <span
-        v-for="r in regions"
-        :key="r"
-        class="badge me-1"
-        :class="selectedRegion === r ? 'text-bg-dark' : 'text-bg-light'"
-        role="button"
-        @click="selectedRegion = r"
-      >{{ r }}</span>
-    </div>
-
-    <p class="small mb-2">
-      <a
-        v-if="selectedCategory !== 'All' || selectedRegion !== 'All'"
-        href="#"
-        class="text-dark"
-        @click.prevent="resetFilters"
-      >Reset filters</a>
-    </p>
-    <p class="small mb-3">
-      <a v-if="!userPos" href="#" class="text-dark" @click.prevent="findMe">Sort by distance from me</a>
-      <template v-else>
-        <span class="text-muted">You're in the {{ userRegion }} region. Closest first.</span>
-        <a href="#" class="text-dark ms-2" @click.prevent="clearLocation">Clear</a>
-      </template>
-      <span v-if="locationError" class="ms-2 text-danger">{{ locationError }}</span>
-    </p>
 
     <!-- On a phone the map shows first, then the list. On desktop they sit side by side. -->
     <div class="row g-3">
       <div class="col-lg-7 order-lg-2">
-        <div ref="mapEl" class="map-box rounded border"></div>
+        <div ref="mapEl" class="map-box"></div>
       </div>
 
       <div class="col-lg-5 order-lg-1">
         <div class="list-pane">
-          <div v-for="s in filteredSkills" :key="s.id" class="card mb-3">
+          <div
+            v-for="s in filteredSkills"
+            :key="s.id"
+            class="card genre-card k-lift mb-3"
+            :class="'cat-' + s.category"
+          >
             <div class="card-body">
-              <div class="d-flex justify-content-between mb-2">
-                <span class="badge text-bg-light">
+              <div class="d-flex justify-content-between align-items-center mb-2">
+                <span class="badge rounded-pill text-bg-light">
                   <span class="dot" :style="{ background: categoryColors[s.category] }"></span>{{ s.category }}
                 </span>
-                <span v-if="hasBooked(s)" class="badge text-bg-success">Booked</span>
+                <span v-if="hasBooked(s)" class="badge rounded-pill text-bg-success">Booked</span>
                 <small v-else-if="s.distance !== null" class="text-muted">{{ s.distance.toFixed(1) }} km away</small>
               </div>
-              <h2 class="h5">{{ s.title }}</h2>
-              <p class="text-muted mb-1">Taught by {{ s.teacherName }}</p>
-              <p v-if="s.mode === 'online'" class="text-muted small mb-1">Online class</p>
-              <p v-else class="text-muted small mb-1">Meets at {{ s.place }} ({{ s.region }})</p>
-              <p class="small mb-3">{{ s.creditCost }} credit{{ s.creditCost === 1 ? '' : 's' }} to join</p>
+
+              <h2 class="h5 mb-2">{{ s.title }}</h2>
+              <div class="d-flex align-items-center gap-2 mb-2">
+                <UserAvatar :name="s.teacherName" />
+                <span class="text-muted">Taught by {{ s.teacherName }}</span>
+              </div>
+              <p v-if="s.mode === 'online'" class="text-muted small mb-2">💻 Online class</p>
+              <p v-else class="text-muted small mb-2">📍 Meets at {{ s.place }} ({{ s.region }})</p>
+              <p class="mb-3">
+                <span class="credit-pill">{{ s.creditCost }} credit{{ s.creditCost === 1 ? '' : 's' }} to join</span>
+              </p>
+
               <button v-if="isMine(s)" class="btn btn-outline-secondary w-100" disabled>Your course</button>
               <button v-else class="btn btn-brand w-100" @click="openBooking(s)">
                 {{ hasBooked(s) ? 'View booking' : 'Book a session' }}
@@ -421,11 +427,24 @@ function goToInsights() {
             </div>
           </div>
 
-          <p v-if="offersStore.loading" class="text-muted">Loading skills...</p>
+          <LoadingText v-if="offersStore.loading" text="Loading skills..." />
           <p v-else-if="offersStore.error" class="text-danger">{{ offersStore.error }}</p>
-          <p v-else-if="filteredSkills.length === 0" class="text-muted">
-            No skills match your filters. Try a different genre or region.
-          </p>
+          <EmptyState
+            v-else-if="skills.length === 0"
+            icon="🌱"
+            title="No courses yet"
+            text="Be the first to teach something and earn credits."
+          >
+            <button class="btn btn-brand btn-sm" @click="router.push('/teach/new')">Teach a skill</button>
+          </EmptyState>
+          <EmptyState
+            v-else-if="filteredSkills.length === 0"
+            icon="🔍"
+            title="No skills match your filters"
+            text="Try a different genre or region, or clear the search."
+          >
+            <button class="btn btn-outline-secondary btn-sm" @click="resetFilters">Clear search and filters</button>
+          </EmptyState>
         </div>
       </div>
     </div>
@@ -440,7 +459,7 @@ function goToInsights() {
   >
     <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable">
       <div class="modal-content">
-        <div class="modal-header banner">
+        <div class="modal-header modal-banner">
           <div>
             <h2 class="h5 mb-0">{{ selectedSkill.title }}</h2>
             <small>Coach: {{ selectedSkill.teacherName }}</small>
@@ -534,22 +553,65 @@ function goToInsights() {
 </template>
 
 <style scoped>
-.banner {
-  background: #f5f0e1;
-  color: #4a3f2a;
+.hero {
+  position: relative;
+  overflow: hidden;
+  background: var(--k-surface-alt);
+  border: 1px solid var(--k-border);
+  border-radius: var(--k-radius);
 }
 
-.btn-brand {
-  background: #b5835a;
-  border-color: #b5835a;
-  color: white;
+.hero-text {
+  padding: 2rem;
+}
+
+.hero h1 {
+  font-size: 2rem;
+  color: var(--k-accent);
+}
+
+/* The photo fills the right part of the box and fades into it on its left side.
+   (It is hidden on a phone, so the text gets the whole width there.) */
+@media (min-width: 768px) {
+  .hero-text {
+    padding-right: 42%;
+  }
+}
+
+.hero-photo {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 40%;
+  height: 100%;
+  object-fit: cover;
+  -webkit-mask-image: linear-gradient(to right, transparent, black 45%);
+  mask-image: linear-gradient(to right, transparent, black 45%);
+}
+
+.filter-label {
+  width: 52px;
+}
+
+/* the genre and region buttons */
+.filter {
+  padding: 4px 14px;
+  border: 1px solid var(--k-border);
+  border-radius: 999px;
+  background: var(--k-surface);
+  color: var(--k-text);
+  font-size: 13px;
   font-weight: 600;
 }
 
-.btn-brand:hover {
-  background: #9c6e48;
-  border-color: #9c6e48;
-  color: white;
+.filter:hover {
+  border-color: var(--k-brand);
+}
+
+.filter.active {
+  background: var(--k-accent);
+  border-color: var(--k-accent);
+  color: var(--k-on-accent);
 }
 
 /* Small coloured dot for each genre */
@@ -563,10 +625,20 @@ function goToInsights() {
 
 .map-box {
   height: 400px;
+  border: 1px solid var(--k-border);
+  border-radius: var(--k-radius);
+  overflow: hidden;
 }
 
+/* the padding leaves room for a card to rise without being cut off */
 .list-pane {
   max-height: 560px;
   overflow-y: auto;
+  padding: 6px 6px 0 2px;
+}
+
+.modal-banner {
+  background: var(--k-surface-alt);
+  color: var(--k-text);
 }
 </style>

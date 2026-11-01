@@ -5,8 +5,11 @@ import { signOut } from 'firebase/auth'
 import { auth } from '../firebase'
 import { getAdminUsers, getDisputes, settleDispute, getDisputeMessages, getMessageReports, errorText } from '../services/api'
 import AdminMessageReports from '../components/AdminMessageReports.vue'
+import LoadingText from '../components/LoadingText.vue'
+import { useToastStore } from '../stores/toast'
 
 const router = useRouter()
+const toast = useToastStore()
 
 // ---------- What is shown ----------
 const tab = ref('users') // 'users', 'disputes' or 'messages'
@@ -65,7 +68,6 @@ const openId = ref('')
 const note = ref('')
 const settling = ref(false)
 const settleError = ref('')
-const settleMessage = ref('')
 
 function openSettle(id) {
   openId.value = openId.value === id ? '' : id
@@ -87,13 +89,13 @@ async function settle(dispute, decision) {
 
   settling.value = true
   settleError.value = ''
-  settleMessage.value = ''
   try {
     await settleDispute(dispute.bookingId, decision, note.value)
-    settleMessage.value =
+    toast.show(
       decision === 'pay-teacher'
         ? dispute.teacherName + ' was paid ' + creditsText(dispute.creditCost) + '.'
         : dispute.learnerName + ' was refunded ' + creditsText(dispute.creditCost) + '.'
+    )
     openId.value = ''
     await loadAll() // the lists and the report counts change
   } catch (err) {
@@ -161,7 +163,7 @@ onMounted(loadAll)
         <button class="btn btn-danger btn-sm" @click="logout">Log Out</button>
       </div>
 
-      <p v-if="loading" class="text-muted">Loading...</p>
+      <LoadingText v-if="loading" />
       <div v-if="error" class="alert alert-danger">{{ error }}</div>
 
       <div class="row mb-4">
@@ -255,7 +257,7 @@ onMounted(loadAll)
                 <td>{{ formatDate(user.createdAt) }}</td>
                 <td>{{ user.isBanned ? 'Banned' : 'Active' }}</td>
                 <td>
-                  <button class="btn btn-info btn-sm" @click="showUserProfile(user.id)">View</button>
+                  <button class="btn btn-brand btn-sm" @click="showUserProfile(user.id)">View</button>
                 </td>
               </tr>
 
@@ -269,7 +271,6 @@ onMounted(loadAll)
 
       <!-- ===== Disputes ===== -->
       <div v-if="tab === 'disputes'">
-        <div v-if="settleMessage" class="alert alert-success" role="status">{{ settleMessage }}</div>
 
         <div class="card custom-card mb-4">
           <div class="card-body">
@@ -384,12 +385,12 @@ onMounted(loadAll)
 
 <style scoped>
 .admin-page {
-  background: #eae7df;
+  background: var(--k-bg);
   min-height: 100vh;
 }
 
 .page-title {
-  color: #4a3f35;
+  color: var(--k-text);
   font-weight: 700;
 }
 
@@ -409,26 +410,26 @@ onMounted(loadAll)
 }
 
 .stat-card h6 {
-  color: #7f7567;
+  color: var(--k-muted);
 }
 
 .stat-card h3 {
-  color: #bb8860;
+  color: var(--k-brand);
   font-weight: bold;
 }
 
 .nav-pills .nav-link {
-  color: #4a3f35;
+  color: var(--k-text);
 }
 
 .nav-pills .nav-link.active {
-  background: #bb8860;
+  background: var(--k-brand);
   color: white;
 }
 
 table th {
-  background: #e2ddd0;
-  color: #4a3f35;
+  background: var(--k-surface-alt);
+  color: var(--k-text);
 }
 
 .report-warning {
@@ -440,23 +441,23 @@ table th {
 }
 
 tbody tr:hover {
-  background-color: #f7f3ec;
+  background-color: var(--k-surface-alt);
 }
 
 .reporter-link {
-  color: #bb8860;
+  color: var(--k-brand);
   text-decoration: none;
   font-weight: 600;
 }
 
 .reporter-link:hover {
-  color: #a56f47;
+  color: var(--k-brand-hover);
   text-decoration: underline;
 }
 
 .chat-box {
-  background: #fbf8f0;
-  border: 1px solid #e3d9bf;
+  background: var(--k-bg);
+  border: 1px solid var(--k-border);
   max-height: 260px;
   overflow-y: auto;
 }
@@ -467,7 +468,7 @@ tbody tr:hover {
 }
 
 .settle-box {
-  background: #f7f3ec;
+  background: var(--k-surface-alt);
 }
 
 .dispute:last-child {

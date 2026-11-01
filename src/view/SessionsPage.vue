@@ -4,6 +4,9 @@ import { useRouter } from 'vue-router'
 import { auth } from '../firebase'
 import { useBookingsStore } from '../stores/bookings'
 import { useProfileStore } from '../stores/profile'
+import NavBar from '../components/NavBar.vue'
+import LoadingText from '../components/LoadingText.vue'
+import EmptyState from '../components/EmptyState.vue'
 
 const router = useRouter()
 const store = useBookingsStore()
@@ -31,23 +34,25 @@ onUnmounted(() => {
   clearInterval(timer)
 })
 
-function goHome() {
-  router.push('/home')
-}
-
 // the two lists on the page
 const sections = computed(() => [
   {
     key: 'learning',
     title: 'Courses I am learning',
     list: store.learning,
-    empty: 'You have not booked anything yet. Find a course on the home page.',
+    icon: '📚',
+    empty: 'You have not booked anything yet.',
+    button: 'Find a course',
+    to: '/home',
   },
   {
     key: 'teaching',
     title: 'Courses I teach',
     list: store.teaching,
+    icon: '🎓',
     empty: 'Nobody has booked one of your courses yet.',
+    button: 'Offer a course',
+    to: '/teach/new',
   },
 ])
 
@@ -60,15 +65,6 @@ const phaseLabels = {
   finished: 'Finished',
   cancelled: 'Cancelled',
   disputed: 'Under review',
-}
-
-const phaseColors = {
-  upcoming: 'text-bg-info',
-  inProgress: 'text-bg-primary',
-  readyToFinish: 'text-bg-warning',
-  finished: 'text-bg-success',
-  cancelled: 'text-bg-secondary',
-  disputed: 'text-bg-danger',
 }
 
 // "Sat, 8 Nov, 14:00" in Singapore time
@@ -150,39 +146,36 @@ async function doReport(b) {
 </script>
 
 <template>
-  <nav class="navbar border-bottom px-3">
-    <span class="navbar-brand fw-bold">Kongsi</span>
-    <span class="text-dark" role="button" @click="goHome">Back to home</span>
-  </nav>
+  <NavBar />
 
   <div class="container py-4">
-    <div class="p-4 mb-4 rounded banner d-flex justify-content-between align-items-center flex-wrap gap-2">
+    <div class="p-4 mb-4 banner d-flex justify-content-between align-items-center flex-wrap gap-2">
       <div>
         <h1 class="h4 mb-1">My sessions</h1>
         <p class="mb-0">Your bookings, as a student and as a teacher. A course is finished when both confirm it.</p>
       </div>
       <div class="text-center">
-        <div class="fs-2 fw-bold">{{ credits }}</div>
+        <div class="fs-2 fw-bold font-heading">{{ credits }}</div>
         <p class="mb-0">time credits</p>
         <small v-if="store.heldCredits > 0">+ {{ store.heldCredits }} held in open bookings</small>
       </div>
     </div>
 
     <p v-if="store.error" class="text-danger">{{ store.error }}</p>
-    <p v-else-if="store.loading && store.bookings.length === 0" class="text-muted">Loading your sessions...</p>
+    <LoadingText v-else-if="store.loading && store.bookings.length === 0" text="Loading your sessions..." />
     <div v-if="store.actionError" class="alert alert-danger">{{ store.actionError }}</div>
 
     <!-- The same card is used for both lists below -->
     <template v-for="section in sections" :key="section.key">
       <h2 class="h5 mb-3">{{ section.title }}</h2>
 
-      <div class="row g-3 mb-4">
+      <div v-if="section.list.length > 0" class="row g-3 mb-4">
         <div v-for="b in section.list" :key="b.id" class="col-12 col-sm-6 col-lg-4">
-          <div class="card h-100">
+          <div class="card genre-card k-lift h-100" :class="'cat-' + b.category">
             <div class="card-body d-flex flex-column">
               <div class="d-flex justify-content-between mb-2">
-                <span class="badge text-bg-light">{{ b.category }}</span>
-                <span class="badge" :class="phaseColors[b.phase]">{{ phaseLabels[b.phase] }}</span>
+                <span class="badge rounded-pill text-bg-light">{{ b.category }}</span>
+                <span class="status" :class="'status-' + b.phase">{{ phaseLabels[b.phase] }}</span>
               </div>
 
               <h3 class="h5">{{ b.title }}</h3>
@@ -296,29 +289,14 @@ async function doReport(b) {
         </div>
       </div>
 
-      <p v-if="section.list.length === 0 && !store.loading && !store.error" class="text-muted mb-4">
-        {{ section.empty }}
-      </p>
+      <EmptyState
+        v-if="section.list.length === 0 && !store.loading && !store.error"
+        class="mb-4"
+        :icon="section.icon"
+        :title="section.empty"
+      >
+        <button class="btn btn-sm btn-brand" @click="router.push(section.to)">{{ section.button }}</button>
+      </EmptyState>
     </template>
   </div>
 </template>
-
-<style scoped>
-.banner {
-  background: #f5f0e1;
-  color: #4a3f2a;
-}
-
-.btn-brand {
-  background: #b5835a;
-  border-color: #b5835a;
-  color: white;
-  font-weight: 600;
-}
-
-.btn-brand:hover {
-  background: #9c6e48;
-  border-color: #9c6e48;
-  color: white;
-}
-</style>

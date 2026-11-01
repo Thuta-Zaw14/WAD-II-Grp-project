@@ -2,6 +2,8 @@
 import { ref, onMounted, onUnmounted, nextTick } from 'vue'
 import { getMessages, sendChatMessage, errorText } from '../services/api'
 import ReportBox from './ReportBox.vue'
+import UserAvatar from './UserAvatar.vue'
+import LoadingText from './LoadingText.vue'
 
 // The private chat of one booking (shown on the chat page, ChatPage.vue).
 // The page asks the server for new messages every few seconds (the browser never talks to
@@ -107,18 +109,20 @@ onUnmounted(stopChecking)
 </script>
 
 <template>
-  <div class="chat border rounded bg-white">
+  <div class="chat k-card overflow-hidden">
     <p v-if="blocked" class="small text-danger p-3 mb-0">{{ error }}</p>
 
-    <div v-else ref="listEl" class="chat-list p-2">
-      <p v-if="loading" class="small text-muted mb-0">Loading the chat...</p>
-      <p v-else-if="messages.length === 0" class="small text-muted mb-0">
+    <div v-else ref="listEl" class="chat-list p-3">
+      <LoadingText v-if="loading" class="small mb-0" text="Loading the chat..." />
+      <p v-else-if="messages.length === 0" class="text-center text-muted my-4">
+        <span class="d-block fs-3" aria-hidden="true">👋</span>
         No messages yet.<template v-if="open"> Say hello to {{ otherName }}!</template>
       </p>
 
-      <div v-for="m in messages" :key="m.n" class="mb-2">
-        <div class="d-flex" :class="m.mine ? 'justify-content-end' : 'justify-content-start'">
-          <div class="bubble rounded px-2 py-1" :class="m.mine ? 'mine' : 'theirs'">
+      <div v-for="m in messages" :key="m.n" class="mb-3">
+        <div class="d-flex align-items-end gap-2" :class="m.mine ? 'justify-content-end' : 'justify-content-start'">
+          <UserAvatar v-if="!m.mine" :name="m.senderName" />
+          <div class="bubble px-3 py-2" :class="m.mine ? 'mine' : 'theirs'">
             <div class="small text-muted">
               {{ m.mine ? 'You' : m.senderName }} · {{ formatTime(m.createdAt) }}
               <template v-if="!m.mine">
@@ -144,7 +148,7 @@ onUnmounted(stopChecking)
 
     <p v-if="error && !blocked" class="small text-danger px-2 mb-1">{{ error }}</p>
 
-    <form v-if="open && !blocked" class="border-top p-2" @submit.prevent="send">
+    <form v-if="open && !blocked" class="composer border-top p-2" @submit.prevent="send">
       <textarea
         v-model="text"
         class="form-control form-control-sm mb-1"
@@ -158,45 +162,37 @@ onUnmounted(stopChecking)
         <button type="submit" class="btn btn-sm btn-brand" :disabled="sending || text.trim() === ''">Send</button>
       </div>
     </form>
-    <p v-else-if="!blocked" class="small text-muted border-top p-2 mb-0">
+    <p v-else-if="!blocked" class="small text-muted border-top p-3 mb-0">
       This booking is over, so the chat is closed. You can still read it.
     </p>
   </div>
 </template>
 
 <style scoped>
+/* The list grows with the messages, so the box to write in sits right under the last one.
+   Once it is taller than about half the screen it scrolls. */
 .chat-list {
-  height: 55vh;
-  min-height: 280px;
+  min-height: 180px;
+  max-height: 55vh;
   overflow-y: auto;
-  background: #fbf8f0;
+  background: var(--k-bg);
 }
 
 .bubble {
-  max-width: 85%;
+  max-width: 80%;
+  border-radius: 18px;
 }
 
+/* my messages on the right, with the corner nearest me less round */
 .bubble.mine {
-  background: #f1dcc6;
+  background: var(--k-brand-soft);
+  border-bottom-right-radius: 4px;
 }
 
 .bubble.theirs {
-  background: white;
-  border: 1px solid #e3d9bf;
-}
-
-/* the small "Report" link under a message of the other person */
-.link-button {
-  background: none;
-  border: none;
-  padding: 0;
-  color: #9c6e48;
-  text-decoration: underline;
-  font-size: inherit;
-}
-
-.link-button:hover {
-  color: #7a5535;
+  background: var(--k-surface);
+  border: 1px solid var(--k-border);
+  border-bottom-left-radius: 4px;
 }
 
 /* keeps the line breaks the person typed, and wraps very long words */
@@ -205,16 +201,7 @@ onUnmounted(stopChecking)
   overflow-wrap: anywhere;
 }
 
-.btn-brand {
-  background: #b5835a;
-  border-color: #b5835a;
-  color: white;
-  font-weight: 600;
-}
-
-.btn-brand:hover:not(:disabled) {
-  background: #9c6e48;
-  border-color: #9c6e48;
-  color: white;
+.composer {
+  background: var(--k-surface);
 }
 </style>

@@ -2,6 +2,8 @@
 import { ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { getMessageReportContext, handleMessageReport, errorText } from '../services/api'
+import { useToastStore } from '../stores/toast'
+import LoadingText from './LoadingText.vue'
 
 // The "Message reports" tab of the admin page: reports on single messages, either a post in a
 // course discussion or a message in a private chat. (Reports on a whole booking are in the
@@ -13,6 +15,7 @@ const props = defineProps({
 const emit = defineEmits(['changed']) // after a decision the admin page loads the lists again
 
 const router = useRouter()
+const toast = useToastStore()
 
 function viewUser(uid) {
   router.push('/admins/users/' + uid)
@@ -86,7 +89,6 @@ const ban = ref(false)
 const note = ref('')
 const working = ref(false)
 const error = ref('')
-const message = ref('')
 
 const anyChoice = computed(() => removeMessage.value || warnChecked.value || ban.value)
 
@@ -119,7 +121,6 @@ async function decide(report) {
 
   working.value = true
   error.value = ''
-  message.value = ''
   try {
     await handleMessageReport(report.id, {
       removeMessage: removeMessage.value,
@@ -127,7 +128,7 @@ async function decide(report) {
       ban: ban.value,
       note: note.value,
     })
-    message.value = steps.length === 0 ? 'Report dismissed.' : 'Done: ' + steps.join(', ') + '.'
+    toast.show(steps.length === 0 ? 'Report dismissed.' : 'Done: ' + steps.join(', ') + '.')
     openId.value = ''
     if (contextId.value === report.id) contextId.value = ''
     emit('changed')
@@ -140,7 +141,6 @@ async function decide(report) {
 
 <template>
   <div>
-    <div v-if="message" class="alert alert-success" role="status">{{ message }}</div>
 
     <div class="card custom-card mb-4">
       <div class="card-body">
@@ -182,7 +182,7 @@ async function decide(report) {
 
           <!-- what was said around it -->
           <div v-if="contextId === r.id" class="context-box mt-3 p-3 rounded">
-            <p v-if="contextLoading" class="small text-muted mb-0">Loading...</p>
+            <LoadingText v-if="contextLoading" class="small mb-0" />
             <p v-else-if="contextError" class="small text-danger mb-0">{{ contextError }}</p>
             <p v-else-if="contextMessages.length === 0" class="small text-muted mb-0">
               Nothing to show (the course may have been deleted). The copy of the message above is what was reported.
@@ -282,31 +282,31 @@ async function decide(report) {
 }
 
 table th {
-  background: #e2ddd0;
-  color: #4a3f35;
+  background: var(--k-surface-alt);
+  color: var(--k-text);
 }
 
 .reporter-link {
-  color: #bb8860;
+  color: var(--k-brand);
   text-decoration: none;
   font-weight: 600;
 }
 
 .reporter-link:hover {
-  color: #a56f47;
+  color: var(--k-brand-hover);
   text-decoration: underline;
 }
 
 .quote {
-  background: #fbf8f0;
-  border-left: 4px solid #bb8860;
+  background: var(--k-bg);
+  border-left: 4px solid var(--k-brand);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
 
 .context-box {
-  background: #fbf8f0;
-  border: 1px solid #e3d9bf;
+  background: var(--k-bg);
+  border: 1px solid var(--k-border);
   max-height: 260px;
   overflow-y: auto;
 }
@@ -321,7 +321,7 @@ table th {
 }
 
 .decision-box {
-  background: #f7f3ec;
+  background: var(--k-surface-alt);
 }
 
 .report:last-child {

@@ -4,12 +4,11 @@ import { useRouter } from 'vue-router'
 import Chart from 'chart.js/auto'
 import { auth } from '../firebase'
 import { getInsights, errorText } from '../services/api'
+import NavBar from '../components/NavBar.vue'
+import LoadingText from '../components/LoadingText.vue'
 
 const router = useRouter()
 
-function goHome() {
-  router.push('/home')
-}
 
 // ---------- Load the totals from the server ----------
 // The server counts everybody's skills and bookings and sends back totals only.
@@ -132,8 +131,8 @@ function drawCharts() {
         {
           label: 'Bookings',
           data: stats.value.weekly.counts,
-          borderColor: '#b5835a',
-          backgroundColor: 'rgba(181, 131, 90, 0.15)',
+          borderColor: '#9a6a44', // --k-brand in theme.css
+          backgroundColor: 'rgba(154, 106, 68, 0.15)',
           fill: true,
           tension: 0.3,
         },
@@ -172,18 +171,15 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <nav class="navbar border-bottom px-3">
-    <span class="navbar-brand fw-bold">Kongsi</span>
-    <span class="text-dark" role="button" @click="goHome">Back to home</span>
-  </nav>
+  <NavBar />
 
   <div class="container py-4">
-    <div class="p-4 mb-4 rounded banner">
+    <div class="p-4 mb-4 banner">
       <h1 class="h4 mb-1">Insights</h1>
       <p class="mb-0">See what people want to learn, and where teachers are needed most.</p>
     </div>
 
-    <p v-if="loading" class="text-muted">Loading the insights...</p>
+    <LoadingText v-if="loading" text="Loading the insights..." />
     <p v-else-if="error" class="text-danger">{{ error }}</p>
 
     <!-- Summary numbers -->
@@ -191,7 +187,7 @@ onUnmounted(() => {
       <div class="col-12 col-md-4">
         <div class="card">
           <div class="card-body text-center">
-            <div class="fs-2 fw-bold">{{ totalLearners }}</div>
+            <div class="fs-2 fw-bold font-heading">{{ totalLearners }}</div>
             <small class="text-muted">people looking to learn a skill</small>
           </div>
         </div>
@@ -199,7 +195,7 @@ onUnmounted(() => {
       <div class="col-12 col-md-4">
         <div class="card">
           <div class="card-body text-center">
-            <div class="fs-2 fw-bold">{{ mostWanted }}</div>
+            <div class="fs-2 fw-bold font-heading">{{ mostWanted }}</div>
             <small class="text-muted">most wanted skill</small>
           </div>
         </div>
@@ -207,7 +203,7 @@ onUnmounted(() => {
       <div class="col-12 col-md-4">
         <div class="card">
           <div class="card-body text-center">
-            <div class="fs-2 fw-bold">{{ topGenre }}</div>
+            <div class="fs-2 fw-bold font-heading">{{ topGenre }}</div>
             <small class="text-muted">top genre in demand</small>
           </div>
         </div>
@@ -331,27 +327,9 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
-.banner {
-  background: #f5f0e1;
-  color: #4a3f2a;
-}
-
-.btn-brand {
-  background: #b5835a;
-  border-color: #b5835a;
-  color: white;
-  font-weight: 600;
-}
-
-.btn-brand:hover {
-  background: #9c6e48;
-  border-color: #9c6e48;
-  color: white;
-}
-
 /* The grey track behind each bar, and the coloured bar on top of it */
 .bar-track {
-  background: #eee;
+  background: var(--k-surface-alt);
   height: 12px;
 }
 

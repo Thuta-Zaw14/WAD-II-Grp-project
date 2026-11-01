@@ -2,9 +2,12 @@
 import { onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { getAdminUser, banUser, unbanUser, warnUser, removeWarning, errorText } from '../services/api'
+import LoadingText from '../components/LoadingText.vue'
+import { useToastStore } from '../stores/toast'
 
 const route = useRoute()
 const router = useRouter()
+const toast = useToastStore()
 
 const user = ref(null) // null until loaded
 const loadError = ref('')
@@ -12,7 +15,6 @@ const loadError = ref('')
 const showWarningForm = ref(false)
 const warningReason = ref('')
 const submitting = ref(false)
-const actionMessage = ref('')
 const actionError = ref('')
 
 async function loadUser() {
@@ -36,16 +38,15 @@ function viewUser(uid) {
   router.push('/admins/users/' + uid)
 }
 
-// Runs one action (ban, unban, warn, ...) and shows what happened.
+// Runs one action (ban, unban, warn, ...) and shows what happened in a toast.
 // "work" is the function that talks to the server; it only runs after the person agreed.
 async function doAction(work, successText) {
   if (submitting.value) return
   submitting.value = true
   actionError.value = ''
-  actionMessage.value = ''
   try {
     await work()
-    actionMessage.value = successText
+    toast.show(successText)
   } catch (err) {
     actionError.value = errorText(err)
   }
@@ -101,7 +102,7 @@ onMounted(loadUser)
       <h1 class="page-title mb-4">User Profile</h1>
 
       <div v-if="loadError" class="alert alert-danger">{{ loadError }}</div>
-      <p v-else-if="!user" class="text-muted">Loading...</p>
+      <LoadingText v-else-if="!user" />
 
       <template v-if="user">
         <!-- User information and admin actions -->
@@ -138,7 +139,6 @@ onMounted(loadUser)
             <h4 class="section-title">Admin Actions</h4>
             <p class="text-muted">Manage this user's account and warnings.</p>
 
-            <div v-if="actionMessage" class="alert alert-success" role="status">{{ actionMessage }}</div>
             <div v-if="actionError" class="alert alert-danger" role="alert">{{ actionError }}</div>
 
             <div class="d-flex flex-wrap gap-2">
@@ -280,17 +280,17 @@ onMounted(loadUser)
 
 <style scoped>
 .profile-page {
-  background: #eae7df;
+  background: var(--k-bg);
   min-height: 100vh;
 }
 
 .page-title {
-  color: #4a3f35;
+  color: var(--k-text);
   font-weight: 700;
 }
 
 .user-name {
-  color: #4a3f35;
+  color: var(--k-text);
 }
 
 .custom-card {
@@ -301,19 +301,19 @@ onMounted(loadUser)
 }
 
 .section-title {
-  color: #4a3f35;
+  color: var(--k-text);
   font-weight: 600;
   margin-bottom: 1rem;
 }
 
 .back-btn {
-  background: #bb8860;
+  background: var(--k-brand);
   color: white;
   border: none;
 }
 
 .back-btn:hover {
-  background: #a56f47;
+  background: var(--k-brand-hover);
   color: white;
 }
 
@@ -326,13 +326,13 @@ onMounted(loadUser)
 }
 
 .teach {
-  background: #bb8860;
+  background: var(--k-brand);
   color: white;
 }
 
 .learn {
-  background: #e2ddd0;
-  color: #4a3f35;
+  background: var(--k-surface-alt);
+  color: var(--k-text);
 }
 
 .status-active {
@@ -346,13 +346,13 @@ onMounted(loadUser)
 }
 
 .reporter-link {
-  color: #bb8860;
+  color: var(--k-brand);
   text-decoration: none;
   font-weight: 600;
 }
 
 .reporter-link:hover {
-  color: #a56f47;
+  color: var(--k-brand-hover);
   text-decoration: underline;
 }
 
@@ -361,18 +361,18 @@ onMounted(loadUser)
 }
 
 .submit-warning-btn {
-  background: #4a3f35;
+  background: var(--k-text);
   color: white;
   border: none;
 }
 
 .submit-warning-btn:hover {
-  background: #332b25;
+  background: var(--k-accent-hover);
   color: white;
 }
 
 table th {
-  background: #e2ddd0;
-  color: #4a3f35;
+  background: var(--k-surface-alt);
+  color: var(--k-text);
 }
 </style>

@@ -8,6 +8,7 @@ import {
 } from 'firebase/auth'
 import { useRouter, useRoute } from 'vue-router'
 import { checkAdmin, errorText } from '../services/api'
+import LogoMark from '../components/LogoMark.vue'
 
 import loginImg from '../assets/login.jpg'
 import signupImg from '../assets/signup.jpg'
@@ -81,7 +82,10 @@ async function goToStartPage() {
 <template>
   <div class="page">
     <header class="top text-center py-3 py-md-4">
-      <h1 class="h3 m-0">Kongsi</h1>
+      <h1 class="h3 m-0 d-inline-flex align-items-center gap-2">
+        <LogoMark />
+        Kongsi
+      </h1>
     </header>
 
     <div class="row g-0" :class="{ 'flex-md-row-reverse': isSignup }">
@@ -133,16 +137,16 @@ async function goToStartPage() {
 }
 
 .top {
-  background: #f5f0e1;
-  border-bottom: 1px solid #e3d9bf;
-  color: #4a3f2a;
+  background: var(--k-surface-alt);
+  border-bottom: 1px solid var(--k-border);
+  color: var(--k-accent);
 }
 
 .image-panel {
   position: relative;
   overflow: hidden;
   min-height: 180px;
-  background: #e8dcc4;
+  background: var(--k-surface-alt);
 }
 
 .image-panel img {
@@ -155,36 +159,17 @@ async function goToStartPage() {
 }
 
 .form-side {
-  background: #fbf8f0;
+  background: var(--k-bg);
 }
 
 .card {
   max-width: 400px;
-  border-radius: 14px;
-}
-
-.btn-brand {
-  background: #b5835a;
-  border-color: #b5835a;
-  color: white;
-  font-weight: 600;
-}
-
-.btn-brand:hover {
-  background: #9c6e48;
-  border-color: #9c6e48;
-  color: white;
 }
 
 .link-brand {
-  color: #b5835a;
+  color: var(--k-brand);
   font-weight: 600;
   text-decoration: none;
   vertical-align: baseline;
-}
-
-.form-control:focus {
-  border-color: #b5835a;
-  box-shadow: 0 0 0 3px rgba(181, 131, 90, 0.2);
 }
 </style>

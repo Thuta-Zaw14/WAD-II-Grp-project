@@ -4,10 +4,14 @@ import { useRouter } from 'vue-router'
 import { auth } from '../firebase'
 import { useProfileStore } from '../stores/profile'
 import SkillCard from '../components/SkillCard.vue'
+import NavBar from '../components/NavBar.vue'
+import LoadingText from '../components/LoadingText.vue'
+import { useToastStore } from '../stores/toast'
 import { findSkillNameProblem, squeezeSpaces } from '../services/skillRules'
 
 const router = useRouter()
 const store = useProfileStore()
+const toast = useToastStore()
 
 // ---------- Load everything from the server ----------
 async function loadPage() {
@@ -166,6 +170,7 @@ async function save() {
 
   if (saved) {
     isEditing.value = false
+    toast.show('Profile saved.')
   } else {
     formError.value = store.saveError
   }
@@ -173,13 +178,14 @@ async function save() {
 </script>
 
 <template>
-  <main class="profile-page min-vh-100">
+  <NavBar />
+  <main class="profile-page">
     <div class="container py-4 py-md-5">
       <a href="#" class="back-link text-decoration-none small" @click.prevent="router.push('/home')">
         &larr; Back to home
       </a>
 
-      <p v-if="store.loading" class="text-muted mt-4">Loading your profile...</p>
+      <LoadingText v-if="store.loading" class="mt-4" text="Loading your profile..." />
 
       <div
         v-else-if="store.error"
@@ -445,11 +451,8 @@ async function save() {
 </template>
 
 <style scoped>
-/* Classes starting with "k-" and the colours come from src/assets/theme.css.
-   When the shared stylesheet exists, k-card, btn-kongsi, eyebrow and chip
-   are the ones to move there. */
+/* The colours, and the classes k-card, btn-kongsi and eyebrow, come from src/assets/theme.css */
 .profile-page {
-  background: var(--k-bg);
   color: var(--k-text);
 }
 
@@ -457,21 +460,8 @@ async function save() {
   color: var(--k-muted);
 }
 
-.k-card {
-  background: var(--k-surface);
-  border: 1px solid var(--k-border);
-  border-radius: var(--k-radius);
-}
-
 .k-hero {
   background: var(--k-surface-alt);
-}
-
-.eyebrow {
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 1.6px;
-  color: var(--k-muted);
 }
 
 .avatar {
@@ -485,17 +475,6 @@ async function save() {
   color: var(--k-on-accent);
   font-size: 26px;
   font-weight: 700;
-}
-
-.btn-kongsi {
-  background: var(--k-accent);
-  border: 1px solid var(--k-accent);
-  color: var(--k-on-accent);
-}
-
-.btn-kongsi:hover:not(:disabled) {
-  background: var(--k-accent-hover);
-  color: var(--k-on-accent);
 }
 
 .credits-card {

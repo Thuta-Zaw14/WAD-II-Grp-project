@@ -3,6 +3,7 @@ import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { auth } from '../firebase'
 import BookingChat from '../components/BookingChat.vue'
+import NavBar from '../components/NavBar.vue'
 
 // The private chat of one booking, at /chat/<booking id>. The id in the address arrives as a prop
 // (the route has props: true). The chat itself is the BookingChat component; this page adds the
@@ -33,13 +34,6 @@ const statusLabels = {
   disputed: 'Under review',
 }
 
-const statusColors = {
-  booked: 'text-bg-info',
-  finished: 'text-bg-success',
-  cancelled: 'text-bg-secondary',
-  disputed: 'text-bg-danger',
-}
-
 const heading = computed(() => (info.value ? 'Chat with ' + info.value.otherName : 'Chat'))
 
 function goBack() {
@@ -48,17 +42,16 @@ function goBack() {
 </script>
 
 <template>
-  <nav class="navbar border-bottom px-3">
-    <span class="navbar-brand fw-bold">Kongsi</span>
-    <span class="text-dark" role="button" @click="goBack">Back to My sessions</span>
-  </nav>
+  <NavBar />
 
   <div class="container py-4 chat-container">
-    <div class="p-4 mb-3 rounded banner">
+    <a href="#" class="back-link small" @click.prevent="goBack">&larr; Back to My sessions</a>
+
+    <div class="p-4 mt-2 mb-3 banner">
       <h1 class="h4 mb-1">{{ heading }}</h1>
       <p v-if="info" class="mb-0">
         {{ info.title }}
-        <span class="badge ms-2" :class="statusColors[info.status]">{{ statusLabels[info.status] }}</span>
+        <span class="status ms-2" :class="'status-' + info.status">{{ statusLabels[info.status] }}</span>
       </p>
       <p v-else class="mb-0">Only you and the other person can see this chat.</p>
     </div>
@@ -73,9 +66,9 @@ function goBack() {
 </template>
 
 <style scoped>
-.banner {
-  background: #f5f0e1;
-  color: #4a3f2a;
+.back-link {
+  color: var(--k-muted);
+  text-decoration: none;
 }
 
 /* a chat reads better in a column than stretched across a wide screen */

@@ -5,6 +5,7 @@ import {
 } from '../services/api'
 import { useOffersStore } from './offers'
 import { useProfileStore } from './profile'
+import { useToastStore } from './toast'
 
 export const useBookingsStore = defineStore('bookings', () => {
   // state
@@ -83,6 +84,7 @@ export const useBookingsStore = defineStore('bookings', () => {
       replaceBooking(data.booking)
       if (data.offer) useOffersStore().replaceOffer(data.offer) // the seat is free again
       await useProfileStore().fetchProfile()
+      useToastStore().show('Booking cancelled. Your credits are back.')
       busyId.value = ''
       return true
     } catch (err) {
@@ -101,6 +103,9 @@ export const useBookingsStore = defineStore('bookings', () => {
       replaceBooking(data.booking)
       if (data.booking.status === 'finished') {
         await useProfileStore().fetchProfile() // if I am the teacher, my credits just went up
+        useToastStore().show('Course finished. Thank you both!')
+      } else {
+        useToastStore().show('Marked as finished. Waiting for the other person.')
       }
       busyId.value = ''
       return true
@@ -118,6 +123,7 @@ export const useBookingsStore = defineStore('bookings', () => {
     try {
       const data = await reportBooking(id, reason)
       replaceBooking(data.booking)
+      useToastStore().show('Report sent. An admin will look at it.')
       busyId.value = ''
       return true
     } catch (err) {
