@@ -1,14 +1,405 @@
 import express from 'express'
+import { db } from '../config/firebaseAdmin.js'
 import { verifyToken } from '../middleware/verifyToken.js'
-import { getAllDocs } from '../models/dbQuery.js'
+import { addDoc, getAllDocs, findDocsWhereEquals } from '../models/dbQuery.js'
+import { findProfileSkill, findMediaProblem, cleanMedia, allMediaPaths, findTitleProblem } from '../models/skillRules.js'
+import { regionList, regionCentres } from '../config/skills.js'
+import { MAX_STAGES, calcCreditCost, calcCompletionCredits } from '../config/credits.js'
 
 const router = express.Router()
 
-// Get every offer. The frontend already does the searching and filtering
-// (searchUtils.js), so the server just hands over the list.
+const maxSlots = 20
+
+// ---------- What the browser is allowed to see ----------
+
+// A slot in Firestore holds the uids of the people who booked it (bookedBy).
+// Other people should not see those, so the browser only gets counts.
+// Older demo data has { booked: true/false } instead, so that is handled too.
+function publicSlot(slot) {
+  let taken = 0
+  if (Array.isArray(slot.bookedBy)) {
+    taken = slot.bookedBy.length
+  } else if (slot.booked) {
+    taken = 1
+  }
+  const capacity = slot.capacity || 1
+
+  return {
+    id: slot.id,
+    date: slot.date,
+    time: slot.time,
+    capacity: capacity,
+    taken: taken,
+    spotsLeft: Math.max(capacity - taken, 0),
+    booked: taken >= capacity, // the home page greys out a slot when this is true
+  }
+}
+
+function publicOffer(offer) {
+  const slots = []
+  for (const slot of offer.slots || []) {
+    slots.push(publicSlot(slot))
+  }
+  return { ...offer, title: offer.title || offer.skill, slots: slots }
+}
+
+// ---------- Checking what the form sends ----------
+
+// "2026-11-08" and "14:00" -> a real moment in Singapore time
+function slotMoment(date, time) {
+  return new Date(date + 'T' + time + ':00+08:00')
+}
+
+// true if the text is made only of the characters 0-9
+function allDigits(text) {
+  if (text === '') return false
+  for (const ch of text) {
+    if (!'0123456789'.includes(ch)) return false
+  }
+  return true
+}
+
+// "2026-11-08": three parts joined by '-' with 4, 2 and 2 digits
+function isDateText(text) {
+  const parts = text.split('-')
+  if (parts.length !== 3) return false
+  if (parts[0].length !== 4 || parts[1].length !== 2 || parts[2].length !== 2) return false
+  return allDigits(parts[0]) && allDigits(parts[1]) && allDigits(parts[2])
+}
+
+// "14:00": hours 00-23 and minutes 00-59
+function isTimeText(text) {
+  const parts = text.split(':')
+  if (parts.length !== 2) return false
+  if (parts[0].length !== 2 || parts[1].length !== 2) return false
+  if (!allDigits(parts[0]) || !allDigits(parts[1])) return false
+  return Number(parts[0]) <= 23 && Number(parts[1]) <= 59
+}
+
+function isRealSlot(slot) {
+  if (typeof slot !== 'object' || slot === null) return false
+  if (typeof slot.date !== 'string' || !isDateText(slot.date)) return false
+  if (typeof slot.time !== 'string' || !isTimeText(slot.time)) return false
+  // catches dates that do not exist, like 2026-02-31 or month 13
+  return !Number.isNaN(slotMoment(slot.date, slot.time).getTime())
+}
+
+// Returns an error message, or '' if everything is fine.
+// existing = the saved offer when editing (its slots may already be in the past)
+function findProblem(body, uid, user, existing) {
+  if (typeof body.title !== 'string' || body.title.trim() === '') return 'Please enter a title.'
+  const titleProblem = findTitleProblem(body.title)
+  if (titleProblem !== '') return titleProblem
+
+  if (body.description !== undefined && (typeof body.description !== 'string' || body.description.length > 1000)) {
+    return 'The description must be 1000 characters or fewer.'
+  }
+
+  if (!findProfileSkill(user, 'skillsTeach', body.skill)) {
+    return 'Pick one of the skills from your profile.'
+  }
+
+  if (body.mode !== 'physical' && body.mode !== 'online') return 'Choose a physical or an online class.'
+
+  if (body.mode === 'physical') {
+    if (!regionList.includes(body.region)) return 'Please pick a region.'
+    if (typeof body.place !== 'string' || body.place.trim() === '') return 'Please enter a public meeting place.'
+    if (body.place.trim().length > 100) return 'The meeting place must be 100 characters or fewer.'
+    if (!['provided', 'bring', 'not_required'].includes(body.equipmentOption)) return 'Choose an equipment option.'
+    if (!['standard', 'high_risk'].includes(body.difficulty)) return 'Choose a difficulty.'
+  }
+
+  if (!Number.isInteger(body.maxCapacity) || body.maxCapacity < 1 || body.maxCapacity > 50) {
+    return 'Maximum students must be a whole number from 1 to 50.'
+  }
+  if (!Number.isInteger(body.durationWeeks) || body.durationWeeks < 1 || body.durationWeeks > 52) {
+    return 'Course length must be a whole number of weeks (1-52).'
+  }
+  if (!Number.isInteger(body.lessonsPerWeek) || body.lessonsPerWeek < 1 || body.lessonsPerWeek > 7) {
+    return 'Lessons per week must be a whole number (1-7).'
+  }
+
+  if (!Array.isArray(body.stages) || body.stages.length < 1) return 'A course needs at least 1 stage.'
+  if (body.stages.length > MAX_STAGES) return 'A course can have up to ' + MAX_STAGES + ' stages.'
+  for (const stage of body.stages) {
+    if (typeof stage !== 'object' || stage === null) return 'A stage is not valid.'
+    if (typeof stage.name !== 'string' || stage.name.trim() === '') return 'Every stage needs a name.'
+    if (stage.name.trim().length > 60) return 'A stage name must be 60 characters or fewer.'
+    if (stage.description !== undefined && (typeof stage.description !== 'string' || stage.description.length > 500)) {
+      return 'A stage description must be 500 characters or fewer.'
+    }
+    const stageMedia = findMediaProblem(stage.media || [], uid, 3, true)
+    if (stageMedia !== '') return stageMedia
+  }
+
+  const mediaProblem = findMediaProblem(body.media || [], uid, 5, false)
+  if (mediaProblem !== '') return mediaProblem
+
+  if (!Array.isArray(body.slots) || body.slots.length < 1) return 'Add at least one start date and time.'
+  if (body.slots.length > maxSlots) return 'You can add up to ' + maxSlots + ' start times.'
+  const oldIds = []
+  for (const slot of (existing && existing.slots) || []) {
+    oldIds.push(slot.id)
+  }
+  for (const slot of body.slots) {
+    if (!isRealSlot(slot)) return 'A start date or time is not valid.'
+    const id = slot.date + '-' + slot.time
+    // a start time that is already saved may be in the past; a new one may not
+    if (!oldIds.includes(id) && slotMoment(slot.date, slot.time) <= new Date()) {
+      return 'Start times must be in the future.'
+    }
+  }
+
+  return ''
+}
+
+// ---------- Building the document we store ----------
+
+function buildSlots(bodySlots, capacity, existing) {
+  const oldSlots = (existing && existing.slots) || []
+  const slots = []
+  const seen = []
+
+  for (const slot of bodySlots) {
+    const id = slot.date + '-' + slot.time
+    if (seen.includes(id)) continue // the same start time twice
+    seen.push(id)
+
+    // keep the people who already booked this slot
+    let bookedBy = []
+    for (const old of oldSlots) {
+      if (old.id === id && Array.isArray(old.bookedBy)) bookedBy = old.bookedBy
+    }
+    slots.push({ id: id, date: slot.date, time: slot.time, capacity: capacity, bookedBy: bookedBy })
+  }
+
+  // slots sorted soonest first
+  slots.sort((a, b) => (a.id < b.id ? -1 : 1))
+  return slots
+}
+
+// an existing slot that people booked must not disappear or shrink below its bookings
+function findSlotProblem(slots, capacity, existing) {
+  for (const old of (existing && existing.slots) || []) {
+    const taken = Array.isArray(old.bookedBy) ? old.bookedBy.length : 0
+    if (taken === 0) continue
+    let found = null
+    for (const slot of slots) {
+      if (slot.id === old.id) found = slot
+    }
+    if (found === null) return 'You cannot remove a start time that students have booked (' + old.date + ' ' + old.time + ').'
+    if (taken > capacity) return 'Maximum students cannot be lower than the ' + taken + ' already booked on ' + old.date + ' ' + old.time + '.'
+  }
+  return ''
+}
+
+function buildOffer(body, uid, user, existing) {
+  const skill = findProfileSkill(user, 'skillsTeach', body.skill)
+  const physical = body.mode === 'physical'
+  const equipmentOption = physical ? body.equipmentOption : 'not_required'
+  const difficulty = physical ? body.difficulty : 'standard'
+
+  // the pin on the home page map: the region's middle, shifted a little.
+  // Keep the old pin when the region has not changed.
+  let lat = null
+  let lng = null
+  if (physical) {
+    if (existing && existing.region === body.region && existing.lat) {
+      lat = existing.lat
+      lng = existing.lng
+    } else {
+      const centre = regionCentres[body.region]
+      lat = centre.lat + (Math.random() - 0.5) * 0.03
+      lng = centre.lng + (Math.random() - 0.5) * 0.03
+    }
+  }
+
+  const stages = []
+  for (const stage of body.stages) {
+    stages.push({
+      name: stage.name.trim(),
+      description: (stage.description || '').trim(),
+      media: cleanMedia(stage.media || []),
+    })
+  }
+
+  // The prices are worked out HERE, from the answers. Anything the browser
+  // sends for them is ignored.
+  const creditCost = calcCreditCost({ mode: body.mode, equipmentOption: equipmentOption })
+  const completionCredits = calcCompletionCredits({
+    stageCount: stages.length,
+    lessonsPerWeek: body.lessonsPerWeek,
+    equipmentOption: equipmentOption,
+    difficulty: difficulty,
+  })
+
+  return {
+    title: body.title.trim(),
+    description: (body.description || '').trim(),
+    media: cleanMedia(body.media || []),
+    skill: skill.name,
+    category: skill.category,
+    mode: body.mode,
+    region: physical ? body.region : '',
+    place: physical ? body.place.trim() : '',
+    lat: lat,
+    lng: lng,
+    equipmentOption: equipmentOption,
+    equipmentProvided: equipmentOption === 'provided',
+    difficulty: difficulty,
+    maxCapacity: body.maxCapacity,
+    durationWeeks: body.durationWeeks,
+    lessonsPerWeek: body.lessonsPerWeek,
+    stages: stages,
+    slots: buildSlots(body.slots, body.maxCapacity, existing),
+    creditCost: creditCost,
+    bonusCredit: completionCredits > 1,
+    studentCompletionCredits: completionCredits,
+    teacherCredits: creditCost,
+    teacherUid: uid,
+  }
+}
+
+// Loads the signed-in user's profile. The teacher's name is shown to students,
+// so a profile without a name cannot publish a course.
+async function loadTeacher(uid) {
+  const snapshot = await db.collection('users').doc(uid).get()
+  if (!snapshot.exists) return { error: 'Set up your profile first.' }
+  const user = snapshot.data()
+  if (!user.name || user.name.trim() === '') return { error: 'Add your name on your profile first.' }
+  return { user: user }
+}
+
+// Does this teacher already have a course with this title?
+async function titleTaken(uid, title, exceptId) {
+  const result = await findDocsWhereEquals('offers', 'teacherUid', uid)
+  for (const offer of result.docs || []) {
+    if (offer.id !== exceptId && (offer.title || '').toLowerCase() === title.trim().toLowerCase()) {
+      return true
+    }
+  }
+  return false
+}
+
+// ---------- Routes ----------
+
+// Every course (the home page filters and searches in the browser)
 router.get('/', verifyToken, async (req, res) => {
   const offers = await getAllDocs('offers')
-  res.json(offers)
+  const list = []
+  for (const offer of offers) {
+    list.push(publicOffer(offer))
+  }
+  res.json(list)
+})
+
+// My own courses (for the profile page and the edit form).
+// This route must stay above '/:id'.
+router.get('/mine', verifyToken, async (req, res) => {
+  const result = await findDocsWhereEquals('offers', 'teacherUid', req.user.uid)
+  if (!result.status) {
+    return res.status(500).json({ error: 'Could not load your courses.' })
+  }
+  const list = []
+  for (const offer of result.docs) {
+    list.push(publicOffer(offer))
+  }
+  list.sort((a, b) => ((a.createdAt || '') < (b.createdAt || '') ? 1 : -1)) // newest first
+  res.json(list)
+})
+
+router.post('/', verifyToken, async (req, res) => {
+  const teacher = await loadTeacher(req.user.uid)
+  if (teacher.error) {
+    return res.status(400).json({ error: teacher.error })
+  }
+
+  const problem = findProblem(req.body, req.user.uid, teacher.user, null)
+  if (problem !== '') {
+    return res.status(400).json({ error: problem })
+  }
+  if (await titleTaken(req.user.uid, req.body.title, null)) {
+    return res.status(409).json({ error: 'You already have a course with this title.' })
+  }
+
+  const offer = buildOffer(req.body, req.user.uid, teacher.user, null)
+  offer.teacherName = teacher.user.name.trim()
+  offer.activeStudents = 0
+  offer.createdAt = new Date().toISOString()
+  offer.updatedAt = offer.createdAt
+
+  const result = await addDoc('offers', offer)
+  if (!result.status) {
+    return res.status(500).json({ error: 'Could not save your course.' })
+  }
+  res.status(201).json(publicOffer({ id: result.id, ...offer }))
+})
+
+router.put('/:id', verifyToken, async (req, res) => {
+  const ref = db.collection('offers').doc(req.params.id)
+  const snapshot = await ref.get()
+  if (!snapshot.exists) {
+    return res.status(404).json({ error: 'Course not found.' })
+  }
+  const existing = { id: snapshot.id, ...snapshot.data() }
+  if (existing.teacherUid !== req.user.uid) {
+    return res.status(403).json({ error: 'This is not your course.' })
+  }
+
+  const teacher = await loadTeacher(req.user.uid)
+  if (teacher.error) {
+    return res.status(400).json({ error: teacher.error })
+  }
+
+  const problem = findProblem(req.body, req.user.uid, teacher.user, existing)
+  if (problem !== '') {
+    return res.status(400).json({ error: problem })
+  }
+  if (await titleTaken(req.user.uid, req.body.title, existing.id)) {
+    return res.status(409).json({ error: 'You already have a course with this title.' })
+  }
+
+  const offer = buildOffer(req.body, req.user.uid, teacher.user, existing)
+  const slotProblem = findSlotProblem(offer.slots, offer.maxCapacity, existing)
+  if (slotProblem !== '') {
+    return res.status(409).json({ error: slotProblem })
+  }
+
+  offer.teacherName = teacher.user.name.trim()
+  offer.updatedAt = new Date().toISOString()
+  await ref.update(offer)
+
+  // pictures the teacher took off: the browser deletes these from Storage
+  const keep = allMediaPaths(offer.media, offer.stages)
+  const removedPaths = []
+  for (const path of allMediaPaths(existing.media, existing.stages)) {
+    if (!keep.includes(path)) removedPaths.push(path)
+  }
+
+  res.json({ offer: publicOffer({ ...existing, ...offer }), removedPaths: removedPaths })
+})
+
+router.delete('/:id', verifyToken, async (req, res) => {
+  const ref = db.collection('offers').doc(req.params.id)
+  const snapshot = await ref.get()
+  if (!snapshot.exists) {
+    return res.status(404).json({ error: 'Course not found.' })
+  }
+  const offer = snapshot.data()
+  if (offer.teacherUid !== req.user.uid) {
+    return res.status(403).json({ error: 'This is not your course.' })
+  }
+
+  let students = offer.activeStudents || 0
+  for (const slot of offer.slots || []) {
+    if (Array.isArray(slot.bookedBy)) students += slot.bookedBy.length
+  }
+  if (students > 0) {
+    return res.status(409).json({ error: "Can't delete this course: students have booked it." })
+  }
+
+  await ref.delete()
+  res.json({ ok: true, removedPaths: allMediaPaths(offer.media, offer.stages) })
 })
 
 export default router

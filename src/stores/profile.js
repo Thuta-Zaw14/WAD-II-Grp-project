@@ -1,21 +1,18 @@
 import { ref, computed } from 'vue'
 import { defineStore } from 'pinia'
-import { createProfile, getMe, updateProfile, getMySkillCards, getOptions } from '../services/api'
-
-// The server sends a helpful message when it says no (e.g. "Please enter your name.")
-function errorText(err) {
-  if (err.response && err.response.data && err.response.data.error) {
-    return err.response.data.error
-  }
-  return err.message
-}
+import {
+  createProfile, getMe, updateProfile, getMySkillCards, getOptions, getMyOffers, getMyGoals, errorText,
+} from '../services/api'
 
 export const useProfileStore = defineStore('profile', () => {
   // state
   const profile = ref(null)
   const categories = ref([]) // the genres a skill can be filed under, e.g. 'Sports'
   const regions = ref([])
+  const knownSkills = ref([]) // suggestions: [{ name: 'Tennis', category: 'Sports' }, ...]
   const skillCards = ref([])
+  const myOffers = ref([]) // courses I teach
+  const myGoals = ref([]) // skills I want to learn
   const loading = ref(false)
   const saving = ref(false)
   const error = ref('')
@@ -51,6 +48,7 @@ export const useProfileStore = defineStore('profile', () => {
       const options = await getOptions()
       categories.value = options.categories
       regions.value = options.regions
+      knownSkills.value = options.skills
     } catch (err) {
       error.value = 'Could not load the genre list: ' + errorText(err)
     }
@@ -61,6 +59,16 @@ export const useProfileStore = defineStore('profile', () => {
       skillCards.value = await getMySkillCards()
     } catch (err) {
       console.error('Could not load skill cards:', errorText(err))
+    }
+  }
+
+  // the courses I teach and the skills I want to learn (the profile page and both forms use them)
+  async function fetchMyCourses() {
+    try {
+      myOffers.value = await getMyOffers()
+      myGoals.value = await getMyGoals()
+    } catch (err) {
+      error.value = 'Could not load your courses: ' + errorText(err)
     }
   }
 
@@ -83,13 +91,15 @@ export const useProfileStore = defineStore('profile', () => {
   function reset() {
     profile.value = null
     skillCards.value = []
+    myOffers.value = []
+    myGoals.value = []
     error.value = ''
     saveError.value = ''
   }
 
   return {
-    profile, categories, regions, skillCards, loading, saving, error, saveError,
+    profile, categories, regions, knownSkills, skillCards, myOffers, myGoals, loading, saving, error, saveError,
     credits,
-    fetchProfile, fetchOptions, fetchSkillCards, saveProfile, reset,
+    fetchProfile, fetchOptions, fetchSkillCards, fetchMyCourses, saveProfile, reset,
   }
 })

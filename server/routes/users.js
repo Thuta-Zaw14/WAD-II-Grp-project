@@ -3,6 +3,7 @@ import { db } from '../config/firebaseAdmin.js'
 import { verifyToken } from '../middleware/verifyToken.js'
 import { addDocID, findDocsWhereEquals } from '../models/dbQuery.js'
 import { categoryList, regionList } from '../config/skills.js'
+   import { findSkillNameProblem, squeezeSpaces } from '../models/skillRules.js'
 
 const router = express.Router()
 
@@ -80,7 +81,7 @@ function cleanSkills(list) {
   const result = []
   const seen = []
   for (const skill of list) {
-    const name = skill.name.trim().split(/\s+/).join(' ')
+    const name = squeezeSpaces(skill.name)
     const key = name.toLowerCase()
     if (!seen.includes(key)) {
       seen.push(key)

@@ -114,20 +114,26 @@ const filteredSkills = computed(() => {
   const results = []
 
   for (const item of skills.value) {
-    const textMatches = [item.skill, item.teacherName, item.category]
+    const textMatches = matches(search.value, [item.title, item.skill, item.teacherName, item.category])
     const categoryMatches =
       selectedCategory.value === 'All' || item.category === selectedCategory.value
     const regionMatches = selectedRegion.value === 'All' || item.region === selectedRegion.value
 
     if (textMatches && categoryMatches && regionMatches) {
-      const distance = userPos.value ? distanceKm(userPos.value, item) : null
+      // online classes have no pin, so they have no distance
+      const hasPin = typeof item.lat === 'number' && typeof item.lng === 'number'
+      const distance = userPos.value && hasPin ? distanceKm(userPos.value, item) : null
       results.push({ ...item, distance })
     }
   }
 
   // Closest first, once we know where you are
   if (userPos.value) {
-    results.sort((a, b) => a.distance - b.distance)
+    results.sort((a, b) => {
+      if (a.distance === null) return 1 // online classes go last
+      if (b.distance === null) return -1
+      return a.distance - b.distance
+    })
   }
 
   return results
@@ -139,17 +145,18 @@ let map = null
 let pinLayer = null
 
 function drawPins() {
-  if (!pinLayer) return
+  if (!pinLayer) return // the map is not ready yet
   pinLayer.clearLayers()
 
   for (const s of filteredSkills.value) {
+    if (typeof s.lat !== 'number' || typeof s.lng !== 'number') continue // online class: no pin
     const pin = L.circleMarker([s.lat, s.lng], {
       radius: 10,
       color: 'white',
       fillColor: categoryColors[s.category],
       fillOpacity: 1,
     })
-    pin.bindTooltip(s.skill)
+    pin.bindTooltip(s.title)
     pin.on('click', () => openBooking(s)) // clicking a pin opens the booking popup
     pin.addTo(pinLayer)
   }
@@ -296,9 +303,11 @@ function goToInsights() {
                 </span>
                 <small v-if="s.distance !== null" class="text-muted">{{ s.distance.toFixed(1) }} km away</small>
               </div>
-              <h2 class="h5">{{ s.skill }}</h2>
+              <h2 class="h5">{{ s.title }}</h2>
               <p class="text-muted mb-1">Taught by {{ s.teacherName }}</p>
-              <p class="text-muted small mb-3">Meets at {{ s.place }} ({{ s.region }})</p>
+              <p v-if="s.mode === 'online'" class="text-muted small mb-1">Online class</p>
+              <p v-else class="text-muted small mb-1">Meets at {{ s.place }} ({{ s.region }})</p>
+              <p class="small mb-3">{{ s.creditCost }} credit{{ s.creditCost === 1 ? '' : 's' }} to join</p>
               <button class="btn btn-brand w-100" @click="openBooking(s)">Request session</button>
             </div>
           </div>
@@ -324,7 +333,7 @@ function goToInsights() {
       <div class="modal-content">
         <div class="modal-header banner">
           <div>
-            <h2 class="h5 mb-0">{{ selectedSkill.skill }}</h2>
+            <h2 class="h5 mb-0">{{ selectedSkill.title }}</h2>
             <small>Coach: {{ selectedSkill.teacherName }}</small>
           </div>
           <button class="btn-close" @click="closeBooking"></button>

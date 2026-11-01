@@ -20,7 +20,8 @@ function makeSlots() {
     const date = d.toISOString().slice(0, 10) // "2026-10-28"
 
     for (const time of times) {
-      slots.push({ id: date + '-' + time, date: date, time: time, booked: false })
+      // same shape the teach form saves: bookedBy holds the uids of students
+      slots.push({ id: date + '-' + time, date: date, time: time, capacity: 5, bookedBy: [] })
     }
   }
   return slots
@@ -42,6 +43,22 @@ const offers = [
 for (const offer of offers) {
   await db.collection('offers').add({
     ...offer,
+    title: offer.skill, // the teach form lets teachers type their own title
+    description: '',
+    media: [],
+    mode: 'physical',
+    equipmentOption: 'not_required',
+    equipmentProvided: false,
+    difficulty: 'standard',
+    maxCapacity: 5,
+    durationWeeks: 4,
+    lessonsPerWeek: 1,
+    stages: [{ name: 'Lesson 1', description: '', media: [] }],
+    creditCost: 1,
+    bonusCredit: false,
+    studentCompletionCredits: 1,
+    teacherCredits: 1,
+    activeStudents: 0,
     teacherUid: 'seed', // real teachers will have their own uid later
     slots: makeSlots(),
     createdAt: new Date().toISOString(),
