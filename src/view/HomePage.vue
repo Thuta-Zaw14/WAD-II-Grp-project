@@ -18,6 +18,12 @@ const bookingsStore = useBookingsStore()
 const user = ref(null)
 const credits = computed(() => profileStore.credits)
 
+// warnings an admin gave me (shown at the top of the page)
+const warnings = computed(() => {
+  const list = profileStore.profile ? profileStore.profile.warnings : []
+  return Array.isArray(list) ? list : []
+})
+
 // ---------- Login ----------
 function handleAuthChange(firebaseUser) {
   if (firebaseUser) {
@@ -48,6 +54,11 @@ function goToSessions() {
 
 function goToProfile() {
   router.push('/profile')
+}
+
+// the public questions & discussion of a course (anyone can read and write there)
+function openDiscussion(skill) {
+  router.push('/discussion/' + skill.id)
 }
 
 // ---------- Skills (loaded from Firestore through the offers store) ----------
@@ -311,6 +322,16 @@ function goToInsights() {
   </nav>
 
   <div class="container py-4">
+    <!-- e.g. "Your account has been suspended." for a banned person -->
+    <div v-if="profileStore.error" class="alert alert-danger">{{ profileStore.error }}</div>
+
+    <div v-if="warnings.length > 0" class="alert alert-warning">
+      <strong>{{ warnings.length === 1 ? 'You have a warning' : 'You have ' + warnings.length + ' warnings' }} from the Kongsi team.</strong>
+      <ul class="mb-0 mt-1">
+        <li v-for="(w, i) in warnings" :key="i">{{ w.reason }}</li>
+      </ul>
+    </div>
+
     <div class="p-4 mb-4 rounded banner d-flex justify-content-between align-items-center flex-wrap gap-2">
       <div>
         <h1 class="h4 mb-1">Welcome back</h1>
@@ -393,6 +414,9 @@ function goToInsights() {
               <button v-if="isMine(s)" class="btn btn-outline-secondary w-100" disabled>Your course</button>
               <button v-else class="btn btn-brand w-100" @click="openBooking(s)">
                 {{ hasBooked(s) ? 'View booking' : 'Book a session' }}
+              </button>
+              <button class="btn btn-sm btn-outline-secondary w-100 mt-2" @click="openDiscussion(s)">
+                Questions &amp; discussion
               </button>
             </div>
           </div>

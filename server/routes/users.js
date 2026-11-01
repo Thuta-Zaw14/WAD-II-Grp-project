@@ -123,6 +123,9 @@ router.post('/', verifyToken, async (req, res) => {
     skillsTeach: [],
     skillsLearn: [],
     referredBy: await findInviter(req.body.ref, req.user.uid), // who invited this person ('' = nobody)
+    isAdmin: false, // an admin is made by hand: set this to true in the Firestore console
+    isBanned: false,
+    warnings: [], // warnings from an admin: { reason, createdAt, by }
     createdAt: new Date().toISOString(),
   }
 

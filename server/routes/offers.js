@@ -6,6 +6,7 @@ import { findProfileSkill, findMediaProblem, cleanMedia, allMediaPaths, findTitl
 import { slotMoment } from '../models/bookingRules.js'
 import { publicOffer, publicBooking } from '../models/publicView.js'
 import { bookSlot } from '../models/bookings.js'
+import { deleteDiscussion } from '../models/discussions.js'
 import { regionList, regionCentres } from '../config/skills.js'
 import { MAX_STAGES, calcCreditCost } from '../config/credits.js'
 
@@ -389,6 +390,15 @@ router.delete('/:id', verifyToken, async (req, res) => {
   if (outcome.error) {
     return res.status(outcome.status).json({ error: outcome.error })
   }
+
+  // the course is gone, so its public discussion goes too (the delete above already worked,
+  // so a problem here is only logged)
+  try {
+    await deleteDiscussion(req.params.id)
+  } catch (err) {
+    console.log('deleteDiscussion failed:', err.message)
+  }
+
   res.json({ ok: true, removedPaths: allMediaPaths(outcome.offer.media, outcome.offer.stages) })
 })
 

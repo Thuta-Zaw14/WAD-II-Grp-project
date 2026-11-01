@@ -10,8 +10,11 @@
 //                         and the student gets a skill card. If the student was invited by a friend
 //                         and this is their first finished course, the friend is rewarded too.
 //   status 'cancelled' -> the student cancelled at least 24 hours before the start. Refunded.
-//   status 'disputed'  -> someone reported a problem. The credit stays held until it is sorted
-//                         out by hand in the Firestore console.
+//   status 'disputed'  -> someone reported a problem. The credit stays held until an admin settles
+//                         it (Disputes tab of the admin page): either the teacher is paid (the
+//                         booking becomes 'finished', with resolution 'teacher-paid') or the
+//                         student is refunded (it becomes 'cancelled', 'student-refunded').
+//                         An admin-settled booking gets no skill card and no invite reward.
 //
 // OUTSIDE THE SLIDES: every function below uses db.runTransaction(). A transaction reads and
 // writes several documents as ONE step, and if another request changes any of them in the
@@ -317,6 +320,79 @@ export async function reportBooking(uid, bookingId, reason) {
       reportReason: reason,
       reportedAt: now.toISOString(),
       updatedAt: now.toISOString(),
+    }
+    t.update(bookingRef, changes)
+
+    return { booking: { id: bookingId, ...booking, ...changes } }
+  })
+}
+
+// ---------- An admin settles a disputed booking ----------
+// decision is 'pay-teacher' (the course happened: the held credit goes to the teacher) or
+// 'refund-student' (it did not: the held credit goes back to the student, and their seat is freed
+// so they could book the course again). reportedBy and reportReason stay on the booking, so the
+// report is still counted against the other person.
+export async function settleDispute(adminUid, bookingId, decision, note) {
+  const bookingRef = db.collection('bookings').doc(bookingId)
+
+  return db.runTransaction(async (t) => {
+    const bookingSnap = await t.get(bookingRef)
+    if (!bookingSnap.exists) return fail(404, 'Booking not found.')
+    const booking = bookingSnap.data()
+    if (booking.status !== 'disputed') return fail(409, 'This booking is ' + booking.status + ', not under review.')
+
+    // --- reads ---
+    const payTeacher = decision === 'pay-teacher'
+    const teacherRef = db.collection('users').doc(booking.teacherUid)
+    const learnerRef = db.collection('users').doc(booking.learnerUid)
+    const offerRef = db.collection('offers').doc(booking.offerId)
+
+    let teacherSnap = null
+    let learnerSnap = null
+    let offerSnap = null
+    if (payTeacher) {
+      teacherSnap = await t.get(teacherRef)
+      if (!teacherSnap.exists) return fail(409, "The teacher's account could not be found.")
+    } else {
+      learnerSnap = await t.get(learnerRef)
+      if (!learnerSnap.exists) return fail(409, "The student's account could not be found.")
+      offerSnap = await t.get(offerRef)
+    }
+
+    // --- writes ---
+    const now = new Date().toISOString()
+    const changes = {
+      resolution: payTeacher ? 'teacher-paid' : 'student-refunded',
+      resolutionNote: note,
+      resolvedBy: adminUid,
+      resolvedAt: now,
+      updatedAt: now,
+    }
+
+    if (payTeacher) {
+      changes.status = 'finished'
+      changes.finishedAt = now
+      t.update(teacherRef, { credits: (teacherSnap.data().credits || 0) + booking.creditCost })
+    } else {
+      changes.status = 'cancelled'
+      changes.cancelledAt = now
+      t.update(learnerRef, { credits: (learnerSnap.data().credits || 0) + booking.creditCost })
+
+      if (offerSnap.exists) {
+        const newSlots = []
+        for (const slot of offerSnap.data().slots || []) {
+          if (slot.id === booking.slotId) {
+            const stillBooked = []
+            for (const other of bookedByOf(slot)) {
+              if (other !== booking.learnerUid) stillBooked.push(other)
+            }
+            newSlots.push({ ...slot, bookedBy: stillBooked })
+          } else {
+            newSlots.push(slot)
+          }
+        }
+        t.update(offerRef, { slots: newSlots })
+      }
     }
     t.update(bookingRef, changes)
 

@@ -38,6 +38,16 @@ export const useBookingsStore = defineStore('bookings', () => {
     loading.value = false
   }
 
+  // Same as fetchBookings, but quiet: no "Loading..." and no error message. Used to keep the
+  // unread dots fresh while the page stays open.
+  async function refreshBookings() {
+    try {
+      bookings.value = await getMyBookings()
+    } catch (err) {
+      console.log('Could not refresh the sessions:', errorText(err))
+    }
+  }
+
   function replaceBooking(updated) {
     bookings.value = bookings.value.map((b) => (b.id === updated.id ? updated : b))
   }
@@ -128,6 +138,6 @@ export const useBookingsStore = defineStore('bookings', () => {
   return {
     bookings, loading, error, actionError, busyId, booking,
     learning, teaching, heldCredits,
-    fetchBookings, book, cancel, confirm, report, reset,
+    fetchBookings, refreshBookings, book, cancel, confirm, report, reset,
   }
 })

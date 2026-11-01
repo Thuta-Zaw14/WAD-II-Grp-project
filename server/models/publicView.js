@@ -48,6 +48,8 @@ export function publicBooking(booking, uid, now = new Date()) {
   const otherConfirmed = learnerSide ? booking.teacherConfirmed : booking.learnerConfirmed
   const startsAt = new Date(booking.startsAt)
   const reportedByMe = booking.reportedBy === uid
+  const myReadN = (learnerSide ? booking.learnerReadN : booking.teacherReadN) || 0
+  const messageCount = booking.messageCount || 0
 
   return {
     id: booking.id,
@@ -76,6 +78,69 @@ export function publicBooking(booking, uid, now = new Date()) {
     canReport: booking.status === 'booked' && now >= startsAt,
     reportedByMe: reportedByMe,
     reportReason: reportedByMe ? booking.reportReason || '' : '', // only the person who reported sees it
+    resolution: booking.resolution || '', // set when an admin settled a report: 'teacher-paid' or 'student-refunded'
+    resolutionNote: booking.resolutionNote || '',
     createdAt: booking.createdAt,
+    // the private chat of this booking (see models/chat.js)
+    messageCount: messageCount,
+    chatOpen: booking.status === 'booked' || booking.status === 'disputed', // can new messages still be written?
+    unreadChat: role !== '' && messageCount > myReadN && booking.lastMessageBy !== uid, // something new from the other person
+  }
+}
+
+// The little header of a chat page: what the course is called and who the chat is with.
+// (No uids: otherName is the name of the person on the other side.)
+export function publicChatInfo(booking, uid) {
+  const role = roleOf(booking, uid)
+  return {
+    id: booking.id,
+    title: booking.title,
+    role: role,
+    otherName: role === 'learner' ? booking.teacherName : booking.learnerName,
+    status: booking.status,
+  }
+}
+
+// One chat message, as seen by the person asking (uid). The sender's uid is never sent:
+// 'mine' says whether it is theirs, and 'role' says whether the sender is the student or the teacher.
+export function publicMessage(message, uid) {
+  return {
+    id: message.id,
+    n: message.n,
+    mine: message.senderUid === uid,
+    role: message.senderRole,
+    senderName: message.senderName,
+    text: message.text,
+    createdAt: message.createdAt,
+  }
+}
+
+// ---------- The public discussion of a course ----------
+
+// The header of a discussion page: which course it is, who teaches it, and whether that is me.
+export function publicCourseInfo(offer, uid) {
+  return {
+    id: offer.id,
+    title: offer.title || offer.skill,
+    teacherName: offer.teacherName || '',
+    isMine: offer.teacherUid === uid,
+  }
+}
+
+// One post, as seen by the person asking (uid). No uids are sent. A removed post has no text.
+// canDelete: the author can take down their own post, the teacher can take down any post.
+export function publicPost(post, uid, courseTeacherUid) {
+  const removed = post.removed === true
+  const mine = post.authorUid === uid
+  return {
+    n: post.n,
+    mine: mine,
+    isTeacher: post.isTeacher === true,
+    authorName: post.authorName,
+    text: removed ? '' : post.text,
+    removed: removed,
+    removedBy: removed ? post.removedBy || '' : '',
+    createdAt: post.createdAt,
+    canDelete: !removed && (mine || courseTeacherUid === uid),
   }
 }

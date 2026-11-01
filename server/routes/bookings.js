@@ -2,7 +2,8 @@ import express from 'express'
 import { verifyToken } from '../middleware/verifyToken.js'
 import { findDocsWhereEquals } from '../models/dbQuery.js'
 import { cancelBooking, confirmBooking, reportBooking } from '../models/bookings.js'
-import { publicBooking, publicOffer } from '../models/publicView.js'
+import { publicBooking, publicOffer, publicMessage, publicChatInfo } from '../models/publicView.js'
+import { sendMessage, readMessages, chatIsOpen, MAX_MESSAGE_LENGTH } from '../models/chat.js'
 
 // Making a booking is POST /api/offers/:id/slots/:slotId/book (in routes/offers.js).
 // Everything after that is here. The rules are in models/bookings.js.
@@ -89,6 +90,56 @@ router.post('/:id/report', verifyToken, async (req, res) => {
   } catch (err) {
     console.log('reportBooking failed:', err.message)
     res.status(500).json({ error: 'Could not send your report. Please try again.' })
+  }
+})
+
+// ---------- The private chat of a booking (student and teacher only) ----------
+
+// The messages after number "after" (leave it out to get the whole chat). The page asks again
+// every few seconds, each time with the number of the last message it already has.
+router.get('/:id/messages', verifyToken, async (req, res) => {
+  const after = Number(req.query.after)
+  const afterN = Number.isInteger(after) && after > 0 ? after : 0
+
+  try {
+    const result = await readMessages(req.user.uid, req.params.id, afterN)
+    if (result.error) {
+      return res.status(result.status).json({ error: result.error })
+    }
+    const messages = []
+    for (const message of result.messages) {
+      messages.push(publicMessage(message, req.user.uid))
+    }
+    // booking = the header of the chat page; open = can new messages still be written?
+    res.json({
+      messages: messages,
+      open: chatIsOpen(result.booking),
+      booking: publicChatInfo({ id: req.params.id, ...result.booking }, req.user.uid),
+    })
+  } catch (err) {
+    console.log('readMessages failed:', err.message)
+    res.status(500).json({ error: 'Could not load the chat.' })
+  }
+})
+
+router.post('/:id/messages', verifyToken, async (req, res) => {
+  const text = typeof req.body.text === 'string' ? req.body.text.trim() : ''
+  if (text === '') {
+    return res.status(400).json({ error: 'Write a message first.' })
+  }
+  if (text.length > MAX_MESSAGE_LENGTH) {
+    return res.status(400).json({ error: 'A message must be ' + MAX_MESSAGE_LENGTH + ' characters or fewer.' })
+  }
+
+  try {
+    const result = await sendMessage(req.user.uid, req.params.id, text)
+    if (result.error) {
+      return res.status(result.status).json({ error: result.error })
+    }
+    res.status(201).json({ message: publicMessage(result.message, req.user.uid) })
+  } catch (err) {
+    console.log('sendMessage failed:', err.message)
+    res.status(500).json({ error: 'Could not send your message. Please try again.' })
   }
 })
 

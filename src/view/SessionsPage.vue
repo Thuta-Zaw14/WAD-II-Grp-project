@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { auth } from '../firebase'
 import { useBookingsStore } from '../stores/bookings'
@@ -11,6 +11,7 @@ const profileStore = useProfileStore()
 const credits = computed(() => profileStore.credits)
 
 // ---------- Load ----------
+let timer = null
 onMounted(async () => {
   await auth.authStateReady() // wait until Firebase has restored the login
   if (!auth.currentUser) {
@@ -19,6 +20,15 @@ onMounted(async () => {
   }
   profileStore.fetchProfile() // for the credits number
   store.fetchBookings()
+
+  // keep the "new message" dots fresh while the page stays open
+  timer = setInterval(() => {
+    if (!document.hidden) store.refreshBookings()
+  }, 20 * 1000)
+})
+
+onUnmounted(() => {
+  clearInterval(timer)
 })
 
 function goHome() {
@@ -85,6 +95,13 @@ function otherName(b) {
 // one line about what happens to the credits
 function creditNote(b) {
   const cost = creditsText(b.creditCost)
+  // a report that an admin has settled says how
+  if (b.resolution === 'teacher-paid') {
+    return b.role === 'learner' ? cost + ' paid to ' + b.teacherName + ' after an admin looked at your report.' : 'You earned ' + cost + ' after an admin looked at the report.'
+  }
+  if (b.resolution === 'student-refunded') {
+    return b.role === 'learner' ? cost + ' refunded after an admin looked at your report.' : 'An admin refunded the student after a report. No credits.'
+  }
   if (b.role === 'learner') {
     if (b.status === 'finished') return cost + ' paid to ' + b.teacherName + '.'
     if (b.status === 'cancelled') return cost + ' refunded.'
@@ -109,6 +126,12 @@ function openPanel(id, type) {
 
 function closePanel() {
   panel.value = { id: '', type: '' }
+}
+
+// ---------- Chat ----------
+// The chat has its own page (see ChatPage.vue)
+function openChat(b) {
+  router.push('/chat/' + b.id)
 }
 
 async function doCancel(b) {
@@ -193,6 +216,7 @@ async function doReport(b) {
               <p v-else-if="b.phase === 'disputed'" class="small text-muted mb-2">
                 A problem was reported. It is being looked at.
               </p>
+              <p v-if="b.resolutionNote" class="small text-muted mb-2">Admin's note: {{ b.resolutionNote }}</p>
 
               <!-- buttons -->
               <div class="mt-auto">
@@ -218,6 +242,19 @@ async function doReport(b) {
                     @click="openPanel(b.id, 'report')"
                   >
                     Report a problem
+                  </button>
+                  <button
+                    v-if="b.chatOpen || b.messageCount > 0"
+                    class="btn btn-sm btn-outline-dark position-relative"
+                    @click="openChat(b)"
+                  >
+                    Chat with {{ otherName(b) }}
+                    <span
+                      v-if="b.unreadChat"
+                      class="position-absolute top-0 start-100 translate-middle p-1 bg-danger border border-light rounded-circle"
+                    >
+                      <span class="visually-hidden">New messages</span>
+                    </span>
                   </button>
                 </div>
 

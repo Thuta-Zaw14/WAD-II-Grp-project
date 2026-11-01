@@ -1,6 +1,6 @@
 import { ref } from 'vue'
 import { defineStore } from 'pinia'
-import { getOffers } from '../services/api'
+import { getOffers, errorText } from '../services/api'
 
 export const useOffersStore = defineStore('offers', () => {
   // state
@@ -15,7 +15,7 @@ export const useOffersStore = defineStore('offers', () => {
     try {
       offers.value = await getOffers()
     } catch (err) {
-      error.value = 'Could not load skills: ' + err.message
+      error.value = 'Could not load skills: ' + errorText(err)
     }
     loading.value = false
   }

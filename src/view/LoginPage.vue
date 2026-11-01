@@ -4,8 +4,10 @@ import { auth } from '../firebase'
 import {
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
+  signOut,
 } from 'firebase/auth'
 import { useRouter, useRoute } from 'vue-router'
+import { checkAdmin, errorText } from '../services/api'
 
 import loginImg from '../assets/login.jpg'
 import signupImg from '../assets/signup.jpg'
@@ -43,16 +45,36 @@ async function submit() {
     if (isSignup.value) {
       const result = await createUserWithEmailAndPassword(auth, email.value, password.value)
       message.value = 'Account created for ' + result.user.email
+      router.push('/home')
     } else {
       const result = await signInWithEmailAndPassword(auth, email.value, password.value)
       localStorage.removeItem('inviteRef') // an existing account cannot be invited
       message.value = 'Logged in as ' + result.user.email
+      await goToStartPage()
     }
-    router.push('/home')
   } catch (error) {
     isError.value = true
     message.value = 'Failed: ' + error.code
   }
+}
+
+// Admins go to the admin page, everybody else to the home page. A banned person is
+// refused by the server on this very first request, so they are logged straight out again.
+async function goToStartPage() {
+  let admin = false
+  try {
+    const answer = await checkAdmin()
+    admin = answer.isAdmin
+  } catch (err) {
+    if (err.response && err.response.status === 403) {
+      await signOut(auth)
+      isError.value = true
+      message.value = 'Failed: ' + errorText(err)
+      return
+    }
+    // any other problem: carry on as a normal user (the admin pages check again anyway)
+  }
+  router.push(admin ? '/admins' : '/home')
 }
 </script>
 

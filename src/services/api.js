@@ -141,3 +141,124 @@ export async function getInsights() {
   const response = await axios.get(API + '/insights', await authConfig())
   return response.data
 }
+
+// ---------- Admin ----------
+// Every one of these is refused by the server unless the person is an admin.
+
+// -> { isAdmin: true or false }
+export async function checkAdmin() {
+  const response = await axios.get(API + '/admins/check', await authConfig())
+  return response.data
+}
+
+export async function getAdminUsers() {
+  const response = await axios.get(API + '/admins/users', await authConfig())
+  return response.data
+}
+
+// one user with their warnings and the reports made against them
+export async function getAdminUser(uid) {
+  const response = await axios.get(API + '/admins/users/' + encodeURIComponent(uid), await authConfig())
+  return response.data
+}
+
+export async function banUser(uid) {
+  const response = await axios.put(API + '/admins/users/' + encodeURIComponent(uid) + '/ban', {}, await authConfig())
+  return response.data
+}
+
+export async function unbanUser(uid) {
+  const response = await axios.put(API + '/admins/users/' + encodeURIComponent(uid) + '/unban', {}, await authConfig())
+  return response.data
+}
+
+// -> { warning }
+export async function warnUser(uid, reason) {
+  const response = await axios.post(API + '/admins/users/' + encodeURIComponent(uid) + '/warnings', { reason: reason }, await authConfig())
+  return response.data
+}
+
+// index = the place of the warning in the list, counting from 0 -> { warnings }
+export async function removeWarning(uid, index) {
+  const response = await axios.delete(API + '/admins/users/' + encodeURIComponent(uid) + '/warnings/' + index, await authConfig())
+  return response.data
+}
+
+// -> { open: [...], settled: [...] }
+export async function getDisputes() {
+  const response = await axios.get(API + '/admins/disputes', await authConfig())
+  return response.data
+}
+
+// decision is 'pay-teacher' or 'refund-student' -> { report }
+export async function settleDispute(bookingId, decision, note) {
+  const response = await axios.post(API + '/admins/disputes/' + bookingId + '/settle', { decision: decision, note: note }, await authConfig())
+  return response.data
+}
+
+// ---------- The private chat of a booking ----------
+// The messages after number "after" (0 = the whole chat) -> { messages, open }
+// open = can new messages still be written? (false once the booking is finished or cancelled)
+export async function getMessages(bookingId, after) {
+  const response = await axios.get(API + '/bookings/' + bookingId + '/messages?after=' + after, await authConfig())
+  return response.data
+}
+
+// -> { message }
+export async function sendChatMessage(bookingId, text) {
+  const response = await axios.post(API + '/bookings/' + bookingId + '/messages', { text: text }, await authConfig())
+  return response.data
+}
+
+// Admin only: the chat of a booking that was reported -> { messages }
+export async function getDisputeMessages(bookingId) {
+  const response = await axios.get(API + '/admins/disputes/' + bookingId + '/messages', await authConfig())
+  return response.data
+}
+
+// ---------- The public discussion of a course ----------
+// The posts after number "after" (0 = the page was just opened)
+// -> { course, posts, removed, count, replace, earlier, open }
+export async function getDiscussion(offerId, after) {
+  const response = await axios.get(API + '/discussions/' + encodeURIComponent(offerId) + '?after=' + after, await authConfig())
+  return response.data
+}
+
+// -> { post }
+export async function sendPost(offerId, text) {
+  const response = await axios.post(API + '/discussions/' + encodeURIComponent(offerId), { text: text }, await authConfig())
+  return response.data
+}
+
+// Take a post down (its author, or the teacher of the course) -> { ok, n }
+export async function removePost(offerId, n) {
+  const response = await axios.delete(API + '/discussions/' + encodeURIComponent(offerId) + '/posts/' + n, await authConfig())
+  return response.data
+}
+
+// ---------- Reporting one message ----------
+// kind is 'public' (containerId = the course, n = the post) or 'private' (containerId = the booking, n = the message)
+export async function reportMessage(kind, containerId, n, reason) {
+  const body = { kind: kind, containerId: containerId, n: n, reason: reason }
+  const response = await axios.post(API + '/message-reports', body, await authConfig())
+  return response.data
+}
+
+// ---------- Admin: message reports ----------
+// -> { open: [...], handled: [...] }
+export async function getMessageReports() {
+  const response = await axios.get(API + '/admins/message-reports', await authConfig())
+  return response.data
+}
+
+// The messages around a reported one -> { messages, reportedN }
+export async function getMessageReportContext(id) {
+  const response = await axios.get(API + '/admins/message-reports/' + encodeURIComponent(id) + '/context', await authConfig())
+  return response.data
+}
+
+// choices = { removeMessage: true/false, warning: '' or text, ban: true/false, note } -> { report }
+export async function handleMessageReport(id, choices) {
+  const response = await axios.post(API + '/admins/message-reports/' + encodeURIComponent(id) + '/handle', choices, await authConfig())
+  return response.data
+}
