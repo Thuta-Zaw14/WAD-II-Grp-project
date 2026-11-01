@@ -20,5 +20,16 @@ export const useOffersStore = defineStore('offers', () => {
     loading.value = false
   }
 
-  return { offers, loading, error, fetchOffers }
+  // swap in one fresh copy of a course, e.g. after a booking changed its seat count
+  function replaceOffer(updated) {
+    offers.value = offers.value.map((o) => (o.id === updated.id ? updated : o))
+  }
+
+  // forget everything, e.g. when someone logs out (each offer says which slots are "mine")
+  function reset() {
+    offers.value = []
+    error.value = ''
+  }
+
+  return { offers, loading, error, fetchOffers, replaceOffer, reset }
 })

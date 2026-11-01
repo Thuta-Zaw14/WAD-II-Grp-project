@@ -162,8 +162,8 @@ router.patch('/me', verifyToken, async (req, res) => {
   res.json({ id: snapshot.id, ...snapshot.data(), ...changes })
 })
 
-// Skill cards the user has earned. The collection is empty until the
-// sessions step creates a card when a session is finished.
+// Skill cards the user has earned. A card is made when the student and the teacher
+// both confirm a booking is finished (see confirmBooking in models/bookings.js).
 router.get('/me/skill-cards', verifyToken, async (req, res) => {
   const result = await findDocsWhereEquals('skillCards', 'learnerUid', req.user.uid)
 

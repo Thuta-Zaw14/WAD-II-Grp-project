@@ -1,0 +1,133 @@
+import { ref, computed } from 'vue'
+import { defineStore } from 'pinia'
+import {
+  getMyBookings, bookSlot, cancelBooking, confirmBooking, reportBooking, errorText,
+} from '../services/api'
+import { useOffersStore } from './offers'
+import { useProfileStore } from './profile'
+
+export const useBookingsStore = defineStore('bookings', () => {
+  // state
+  const bookings = ref([]) // every booking I am part of (each has role: 'learner' or 'teacher')
+  const loading = ref(false)
+  const error = ref('') // the list could not be loaded
+  const actionError = ref('') // the server said no to a button (e.g. "That start time is full.")
+  const busyId = ref('') // id of the booking being changed, so its buttons can be switched off
+  const booking = ref(false) // true while a new booking is being made
+
+  // getters
+  const learning = computed(() => bookings.value.filter((b) => b.role === 'learner'))
+  const teaching = computed(() => bookings.value.filter((b) => b.role === 'teacher'))
+
+  // credits taken from me that are still waiting for the course to finish
+  const heldCredits = computed(() =>
+    learning.value
+      .filter((b) => b.status === 'booked' || b.status === 'disputed')
+      .reduce((sum, b) => sum + b.creditCost, 0)
+  )
+
+  // actions
+  async function fetchBookings() {
+    loading.value = true
+    error.value = ''
+    try {
+      bookings.value = await getMyBookings()
+    } catch (err) {
+      error.value = 'Could not load your sessions: ' + errorText(err)
+    }
+    loading.value = false
+  }
+
+  function replaceBooking(updated) {
+    bookings.value = bookings.value.map((b) => (b.id === updated.id ? updated : b))
+  }
+
+  // Book a start time. Returns true if it worked, false if not (the reason is in actionError).
+  async function book(offerId, slotId) {
+    booking.value = true
+    actionError.value = ''
+    const offersStore = useOffersStore()
+    try {
+      const data = await bookSlot(offerId, slotId)
+      bookings.value = [...bookings.value, data.booking]
+      offersStore.replaceOffer(data.offer) // one more seat taken
+      await useProfileStore().fetchProfile() // the credit is gone from my balance
+      booking.value = false
+      return true
+    } catch (err) {
+      actionError.value = errorText(err)
+      if (err.response && err.response.status === 409) {
+        offersStore.fetchOffers() // the seats probably changed, show the new numbers
+      }
+      booking.value = false
+      return false
+    }
+  }
+
+  // Cancel a booking (the credit comes back). Returns true / false like book().
+  async function cancel(id) {
+    busyId.value = id
+    actionError.value = ''
+    try {
+      const data = await cancelBooking(id)
+      replaceBooking(data.booking)
+      if (data.offer) useOffersStore().replaceOffer(data.offer) // the seat is free again
+      await useProfileStore().fetchProfile()
+      busyId.value = ''
+      return true
+    } catch (err) {
+      actionError.value = errorText(err)
+      busyId.value = ''
+      return false
+    }
+  }
+
+  // Say the course is finished. When the other person has said so too, the teacher is paid.
+  async function confirm(id) {
+    busyId.value = id
+    actionError.value = ''
+    try {
+      const data = await confirmBooking(id)
+      replaceBooking(data.booking)
+      if (data.booking.status === 'finished') {
+        await useProfileStore().fetchProfile() // if I am the teacher, my credits just went up
+      }
+      busyId.value = ''
+      return true
+    } catch (err) {
+      actionError.value = errorText(err)
+      busyId.value = ''
+      return false
+    }
+  }
+
+  // Report a problem with a booking
+  async function report(id, reason) {
+    busyId.value = id
+    actionError.value = ''
+    try {
+      const data = await reportBooking(id, reason)
+      replaceBooking(data.booking)
+      busyId.value = ''
+      return true
+    } catch (err) {
+      actionError.value = errorText(err)
+      busyId.value = ''
+      return false
+    }
+  }
+
+  // forget everything, e.g. when someone logs out
+  function reset() {
+    bookings.value = []
+    error.value = ''
+    actionError.value = ''
+    busyId.value = ''
+  }
+
+  return {
+    bookings, loading, error, actionError, busyId, booking,
+    learning, teaching, heldCredits,
+    fetchBookings, book, cancel, confirm, report, reset,
+  }
+})

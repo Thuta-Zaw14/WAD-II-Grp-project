@@ -3,52 +3,17 @@ import { db } from '../config/firebaseAdmin.js'
 import { verifyToken } from '../middleware/verifyToken.js'
 import { addDoc, getAllDocs, findDocsWhereEquals } from '../models/dbQuery.js'
 import { findProfileSkill, findMediaProblem, cleanMedia, allMediaPaths, findTitleProblem } from '../models/skillRules.js'
+import { slotMoment } from '../models/bookingRules.js'
+import { publicOffer, publicBooking } from '../models/publicView.js'
+import { bookSlot } from '../models/bookings.js'
 import { regionList, regionCentres } from '../config/skills.js'
-import { MAX_STAGES, calcCreditCost, calcCompletionCredits } from '../config/credits.js'
+import { MAX_STAGES, calcCreditCost } from '../config/credits.js'
 
 const router = express.Router()
 
 const maxSlots = 20
 
-// ---------- What the browser is allowed to see ----------
-
-// A slot in Firestore holds the uids of the people who booked it (bookedBy).
-// Other people should not see those, so the browser only gets counts.
-// Older demo data has { booked: true/false } instead, so that is handled too.
-function publicSlot(slot) {
-  let taken = 0
-  if (Array.isArray(slot.bookedBy)) {
-    taken = slot.bookedBy.length
-  } else if (slot.booked) {
-    taken = 1
-  }
-  const capacity = slot.capacity || 1
-
-  return {
-    id: slot.id,
-    date: slot.date,
-    time: slot.time,
-    capacity: capacity,
-    taken: taken,
-    spotsLeft: Math.max(capacity - taken, 0),
-    booked: taken >= capacity, // the home page greys out a slot when this is true
-  }
-}
-
-function publicOffer(offer) {
-  const slots = []
-  for (const slot of offer.slots || []) {
-    slots.push(publicSlot(slot))
-  }
-  return { ...offer, title: offer.title || offer.skill, slots: slots }
-}
-
 // ---------- Checking what the form sends ----------
-
-// "2026-11-08" and "14:00" -> a real moment in Singapore time
-function slotMoment(date, time) {
-  return new Date(date + 'T' + time + ':00+08:00')
-}
 
 // true if the text is made only of the characters 0-9
 function allDigits(text) {
@@ -223,15 +188,9 @@ function buildOffer(body, uid, user, existing) {
     })
   }
 
-  // The prices are worked out HERE, from the answers. Anything the browser
-  // sends for them is ignored.
+  // The price is worked out HERE, from the answers. Anything the browser
+  // sends for it is ignored.
   const creditCost = calcCreditCost({ mode: body.mode, equipmentOption: equipmentOption })
-  const completionCredits = calcCompletionCredits({
-    stageCount: stages.length,
-    lessonsPerWeek: body.lessonsPerWeek,
-    equipmentOption: equipmentOption,
-    difficulty: difficulty,
-  })
 
   return {
     title: body.title.trim(),
@@ -252,10 +211,7 @@ function buildOffer(body, uid, user, existing) {
     lessonsPerWeek: body.lessonsPerWeek,
     stages: stages,
     slots: buildSlots(body.slots, body.maxCapacity, existing),
-    creditCost: creditCost,
-    bonusCredit: completionCredits > 1,
-    studentCompletionCredits: completionCredits,
-    teacherCredits: creditCost,
+    creditCost: creditCost, // paid by the student when booking; goes to the teacher when the course is finished
     teacherUid: uid,
   }
 }
@@ -288,7 +244,7 @@ router.get('/', verifyToken, async (req, res) => {
   const offers = await getAllDocs('offers')
   const list = []
   for (const offer of offers) {
-    list.push(publicOffer(offer))
+    list.push(publicOffer(offer, req.user.uid))
   }
   res.json(list)
 })
@@ -302,7 +258,7 @@ router.get('/mine', verifyToken, async (req, res) => {
   }
   const list = []
   for (const offer of result.docs) {
-    list.push(publicOffer(offer))
+    list.push(publicOffer(offer, req.user.uid))
   }
   list.sort((a, b) => ((a.createdAt || '') < (b.createdAt || '') ? 1 : -1)) // newest first
   res.json(list)
@@ -324,7 +280,6 @@ router.post('/', verifyToken, async (req, res) => {
 
   const offer = buildOffer(req.body, req.user.uid, teacher.user, null)
   offer.teacherName = teacher.user.name.trim()
-  offer.activeStudents = 0
   offer.createdAt = new Date().toISOString()
   offer.updatedAt = offer.createdAt
 
@@ -332,7 +287,25 @@ router.post('/', verifyToken, async (req, res) => {
   if (!result.status) {
     return res.status(500).json({ error: 'Could not save your course.' })
   }
-  res.status(201).json(publicOffer({ id: result.id, ...offer }))
+  res.status(201).json(publicOffer({ id: result.id, ...offer }, req.user.uid))
+})
+
+// Book a start time. The checks and the saving happen together in models/bookings.js.
+// -> { booking, offer }  (the offer is sent back so the home page can show the new seat count)
+router.post('/:id/slots/:slotId/book', verifyToken, async (req, res) => {
+  try {
+    const result = await bookSlot(req.user.uid, req.params.id, req.params.slotId)
+    if (result.error) {
+      return res.status(result.status).json({ error: result.error })
+    }
+    res.status(201).json({
+      booking: publicBooking(result.booking, req.user.uid),
+      offer: publicOffer(result.offer, req.user.uid),
+    })
+  } catch (err) {
+    console.log('bookSlot failed:', err.message)
+    res.status(500).json({ error: 'Could not complete the booking. Please try again.' })
+  }
 })
 
 router.put('/:id', verifyToken, async (req, res) => {
@@ -360,14 +333,27 @@ router.put('/:id', verifyToken, async (req, res) => {
   }
 
   const offer = buildOffer(req.body, req.user.uid, teacher.user, existing)
-  const slotProblem = findSlotProblem(offer.slots, offer.maxCapacity, existing)
-  if (slotProblem !== '') {
-    return res.status(409).json({ error: slotProblem })
-  }
-
   offer.teacherName = teacher.user.name.trim()
   offer.updatedAt = new Date().toISOString()
-  await ref.update(offer)
+
+  // OUTSIDE THE SLIDES: a student can book while this request is running. So the slots are
+  // worked out again from the newest copy of the course, and saved inside a transaction
+  // (see models/bookings.js), so a booking that just happened is never wiped out.
+  const outcome = await db.runTransaction(async (t) => {
+    const freshSnap = await t.get(ref)
+    if (!freshSnap.exists) return { status: 404, error: 'Course not found.' }
+    const fresh = { id: freshSnap.id, ...freshSnap.data() }
+
+    offer.slots = buildSlots(req.body.slots, offer.maxCapacity, fresh)
+    const slotProblem = findSlotProblem(offer.slots, offer.maxCapacity, fresh)
+    if (slotProblem !== '') return { status: 409, error: slotProblem }
+
+    t.update(ref, offer)
+    return {}
+  })
+  if (outcome.error) {
+    return res.status(outcome.status).json({ error: outcome.error })
+  }
 
   // pictures the teacher took off: the browser deletes these from Storage
   const keep = allMediaPaths(offer.media, offer.stages)
@@ -376,30 +362,34 @@ router.put('/:id', verifyToken, async (req, res) => {
     if (!keep.includes(path)) removedPaths.push(path)
   }
 
-  res.json({ offer: publicOffer({ ...existing, ...offer }), removedPaths: removedPaths })
+  res.json({ offer: publicOffer({ ...existing, ...offer }, req.user.uid), removedPaths: removedPaths })
 })
 
 router.delete('/:id', verifyToken, async (req, res) => {
   const ref = db.collection('offers').doc(req.params.id)
-  const snapshot = await ref.get()
-  if (!snapshot.exists) {
-    return res.status(404).json({ error: 'Course not found.' })
-  }
-  const offer = snapshot.data()
-  if (offer.teacherUid !== req.user.uid) {
-    return res.status(403).json({ error: 'This is not your course.' })
-  }
 
-  let students = offer.activeStudents || 0
-  for (const slot of offer.slots || []) {
-    if (Array.isArray(slot.bookedBy)) students += slot.bookedBy.length
-  }
-  if (students > 0) {
-    return res.status(409).json({ error: "Can't delete this course: students have booked it." })
-  }
+  // In a transaction (outside the slides), so nobody can book the course in the
+  // moment between "no students yet" and the delete.
+  const outcome = await db.runTransaction(async (t) => {
+    const snapshot = await t.get(ref)
+    if (!snapshot.exists) return { status: 404, error: 'Course not found.' }
+    const offer = snapshot.data()
+    if (offer.teacherUid !== req.user.uid) return { status: 403, error: 'This is not your course.' }
 
-  await ref.delete()
-  res.json({ ok: true, removedPaths: allMediaPaths(offer.media, offer.stages) })
+    let students = 0
+    for (const slot of offer.slots || []) {
+      if (Array.isArray(slot.bookedBy)) students += slot.bookedBy.length
+    }
+    if (students > 0) return { status: 409, error: "Can't delete this course: students have booked it." }
+
+    t.delete(ref)
+    return { offer: offer }
+  })
+
+  if (outcome.error) {
+    return res.status(outcome.status).json({ error: outcome.error })
+  }
+  res.json({ ok: true, removedPaths: allMediaPaths(outcome.offer.media, outcome.offer.stages) })
 })
 
 export default router

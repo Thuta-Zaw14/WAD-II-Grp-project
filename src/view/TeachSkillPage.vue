@@ -4,7 +4,7 @@ import { useRouter } from 'vue-router'
 import { auth } from '@/firebase'
 import { useProfileStore } from '@/stores/profile'
 import { createOffer, updateOffer, deleteOffer, errorText } from '@/services/api'
-import { calcCreditCost, calcCompletionCredits, MAX_STAGES, BONUS_MIN_STAGES, BONUS_STAGE_INTERVAL } from '@/services/credits'
+import { calcCreditCost, MAX_STAGES } from '@/services/credits'
 import { uploadPending, deleteMany } from '@/services/storage'
 import SkillsBasicsField from '@/components/SkillsBasicsField.vue'
 import MediaPicker from '@/components/MediaPicker.vue'
@@ -73,15 +73,6 @@ const profileReady = computed(() => {
 // Only used for the preview. The server works out the real price when saving.
 const creditCost = computed(() =>
   calcCreditCost({ mode: mode.value, equipmentOption: equipmentOption.value })
-)
-
-const completionCredits = computed(() =>
-  calcCompletionCredits({
-    stageCount: stages.value.length,
-    lessonsPerWeek: lessonsPerWeek.value,
-    equipmentOption: physical.value ? equipmentOption.value : 'not_required',
-    difficulty: physical.value ? difficulty.value : 'standard',
-  })
 )
 
 // today as "2026-11-01" for the date picker's min (the server checks the real rule)
@@ -419,7 +410,7 @@ async function remove() {
             </div>
             <div class="form-check">
               <input id="equip-bring" v-model="equipmentOption" type="radio" value="bring" class="form-check-input" />
-              <label class="form-check-label" for="equip-bring">Students bring their own (earn +1 credit on completion)</label>
+              <label class="form-check-label" for="equip-bring">Students bring their own</label>
             </div>
             <div class="form-check">
               <input id="equip-not-required" v-model="equipmentOption" type="radio" value="not_required" class="form-check-input" />
@@ -435,9 +426,7 @@ async function remove() {
             </div>
             <div class="form-check">
               <input id="diff-risk" v-model="difficulty" type="radio" value="high_risk" class="form-check-input" />
-              <label class="form-check-label" for="diff-risk">
-                High difficulty (students earn +1 credit when they complete the course)
-              </label>
+              <label class="form-check-label" for="diff-risk">High difficulty</label>
             </div>
           </div>
         </template>
@@ -504,8 +493,7 @@ async function remove() {
         <hr />
         <h2 class="h6">Stages</h2>
         <p class="text-muted small">
-          Add at least 1 stage. Students earn +1 credit from {{ BONUS_MIN_STAGES }} stages,
-          plus 1 credit for every additional {{ BONUS_STAGE_INTERVAL }} stages.
+          Add at least 1 stage. A course can have up to {{ MAX_STAGES }} stages.
         </p>
 
         <div v-for="(s, i) in stages" :key="s.key" class="card card-body mb-3">
@@ -536,15 +524,12 @@ async function remove() {
 
         <div class="alert alert-light border mb-3">
           <p class="mb-1">
-            Students are charged <strong>{{ creditCost }} credit{{ creditCost === 1 ? '' : 's' }}</strong>.
-          </p>
-          <p class="mb-1">
-            Students earn <strong>{{ completionCredits }} credit{{ completionCredits === 1 ? '' : 's' }}</strong>
-            when they complete the course.
+            Students pay <strong>{{ creditCost }} credit{{ creditCost === 1 ? '' : 's' }}</strong> when they book.
+            The credit is held until the course is finished.
           </p>
           <p class="mb-0">
             You earn <strong>{{ creditCost }} credit{{ creditCost === 1 ? '' : 's' }}</strong>
-            for teaching this course.
+            for each student, once you and the student both confirm the course is finished.
           </p>
         </div>
 

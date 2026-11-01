@@ -7,12 +7,14 @@ import 'leaflet/dist/leaflet.css'
 import { auth } from '../firebase'
 import { useOffersStore } from '../stores/offers'
 import { useProfileStore } from '../stores/profile'
+import { useBookingsStore } from '../stores/bookings'
 import SkillSearch from '../components/SkillSearch.vue'
 import { matches } from '../searchUtils'
 
 const router = useRouter()
 const offersStore = useOffersStore()
 const profileStore = useProfileStore()
+const bookingsStore = useBookingsStore()
 const user = ref(null)
 const credits = computed(() => profileStore.credits)
 
@@ -28,6 +30,8 @@ function handleAuthChange(firebaseUser) {
     }
   } else {
     profileStore.reset()
+    offersStore.reset() // each offer says which slots are "mine", so the next person must not see these
+    bookingsStore.reset()
     router.push('/login')
   }
 }
@@ -180,19 +184,96 @@ onUnmounted(() => {
 })
 
 // ---------- Booking popup ----------
-const selectedSkill = ref(null) // null = popup closed
+// Booking has two steps: click a start time to SELECT it, then press "Confirm booking".
+// Nothing is saved until the second step.
+const selectedId = ref(null) // id of the course in the popup (null = popup closed)
+const chosenSlotId = ref('') // the start time that is selected but not confirmed yet
+const bookedMessage = ref('') // shown after a booking worked
+
+// Looked up from the store each time (not copied), so the seat counts update by themselves
+const selectedSkill = computed(() => {
+  for (const s of skills.value) {
+    if (s.id === selectedId.value) return s
+  }
+  return null
+})
+
+const chosenSlot = computed(() => {
+  if (!selectedSkill.value) return null
+  for (const slot of selectedSkill.value.slots) {
+    if (slot.id === chosenSlotId.value) return slot
+  }
+  return null
+})
+
+// is this my own course? (the server also refuses it)
+function isMine(skill) {
+  return user.value !== null && skill.teacherUid === user.value.uid
+}
+
+// have I booked one of this course's start times?
+function hasBooked(skill) {
+  for (const slot of skill.slots) {
+    if (slot.mine) return true
+  }
+  return false
+}
 
 function openBooking(skill) {
-  selectedSkill.value = skill
+  if (isMine(skill)) return
+  selectedId.value = skill.id
+  chosenSlotId.value = ''
+  bookedMessage.value = ''
+  bookingsStore.actionError = ''
 }
 
 function closeBooking() {
-  selectedSkill.value = null
+  selectedId.value = null
 }
 
-function book(slot) {
-  if (slot.booked) return
-  slot.booked = true
+// Step 1: select a start time
+function chooseSlot(slot) {
+  if (slot.booked || slot.past || slot.mine || hasBooked(selectedSkill.value)) return
+  chosenSlotId.value = slot.id
+  bookingsStore.actionError = ''
+}
+
+// how a start time button looks
+function slotClass(slot) {
+  if (slot.mine) return 'btn-success'
+  if (slot.id === chosenSlotId.value) return 'btn-dark'
+  if (slot.booked || slot.past) return 'btn-outline-secondary'
+  return 'btn-brand'
+}
+
+// the hover text that explains why a start time cannot be picked
+function slotNote(slot) {
+  if (slot.mine) return 'You booked this start time'
+  if (slot.past) return 'This start time has already passed'
+  if (slot.booked) return 'This start time is full'
+  return ''
+}
+
+// Step 2: confirm
+async function confirmBooking() {
+  if (!chosenSlot.value) return
+  const ok = await bookingsStore.book(selectedSkill.value.id, chosenSlot.value.id)
+  if (ok) {
+    chosenSlotId.value = ''
+    bookedMessage.value = 'Booked! ' + selectedSkill.value.creditCost + ' credit(s) are held until the course is finished.'
+  }
+}
+
+// "Sat, 8 Nov, 14:00" in Singapore time
+function formatTime(iso) {
+  return new Date(iso).toLocaleString('en-SG', {
+    timeZone: 'Asia/Singapore',
+    weekday: 'short',
+    day: 'numeric',
+    month: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
 }
 
 // Group the slots by date, so each day gets one row of times
@@ -301,14 +382,18 @@ function goToInsights() {
                 <span class="badge text-bg-light">
                   <span class="dot" :style="{ background: categoryColors[s.category] }"></span>{{ s.category }}
                 </span>
-                <small v-if="s.distance !== null" class="text-muted">{{ s.distance.toFixed(1) }} km away</small>
+                <span v-if="hasBooked(s)" class="badge text-bg-success">Booked</span>
+                <small v-else-if="s.distance !== null" class="text-muted">{{ s.distance.toFixed(1) }} km away</small>
               </div>
               <h2 class="h5">{{ s.title }}</h2>
               <p class="text-muted mb-1">Taught by {{ s.teacherName }}</p>
               <p v-if="s.mode === 'online'" class="text-muted small mb-1">Online class</p>
               <p v-else class="text-muted small mb-1">Meets at {{ s.place }} ({{ s.region }})</p>
               <p class="small mb-3">{{ s.creditCost }} credit{{ s.creditCost === 1 ? '' : 's' }} to join</p>
-              <button class="btn btn-brand w-100" @click="openBooking(s)">Request session</button>
+              <button v-if="isMine(s)" class="btn btn-outline-secondary w-100" disabled>Your course</button>
+              <button v-else class="btn btn-brand w-100" @click="openBooking(s)">
+                {{ hasBooked(s) ? 'View booking' : 'Book a session' }}
+              </button>
             </div>
           </div>
 
@@ -340,27 +425,84 @@ function goToInsights() {
         </div>
 
         <div class="modal-body">
-          <p class="text-muted">Pick a time that suits you.</p>
-
-          <div v-for="(daySlots, date) in slotsByDate" :key="date" class="mb-3">
-            <div class="fw-bold mb-2">{{ date }}</div>
-            <div class="d-flex flex-wrap gap-2">
-              <button
-                v-for="slot in daySlots"
-                :key="slot.id"
-                class="btn btn-sm"
-                :class="slot.booked ? 'btn-outline-secondary' : 'btn-brand'"
-                :disabled="slot.booked"
-                @click="book(slot)"
-              >
-                {{ slot.time }}
-              </button>
-            </div>
+          <!-- after a booking worked -->
+          <div v-if="bookedMessage">
+            <div class="alert alert-success">{{ bookedMessage }}</div>
+            <p class="small text-muted">
+              You will find it under My sessions, where you can cancel it while that is still allowed.
+            </p>
+            <button class="btn btn-brand me-2" @click="goToSessions">Go to My sessions</button>
+            <button class="btn btn-outline-secondary" @click="closeBooking">Close</button>
           </div>
 
-          <p v-if="selectedSkill.slots.length === 0" class="text-muted">
-            This coach has no available times yet.
-          </p>
+          <template v-else>
+            <p v-if="hasBooked(selectedSkill)" class="alert alert-info small">
+              You have already booked this course. See My sessions.
+            </p>
+            <p v-else class="text-muted">Pick a time, then confirm your booking.</p>
+
+            <p class="small text-muted">
+              {{ selectedSkill.durationWeeks }} week{{ selectedSkill.durationWeeks === 1 ? '' : 's' }},
+              {{ selectedSkill.lessonsPerWeek }} lesson{{ selectedSkill.lessonsPerWeek === 1 ? '' : 's' }} a week.
+              One booking covers the whole course.
+            </p>
+
+            <!-- Step 1: select a start time -->
+            <div v-for="(daySlots, date) in slotsByDate" :key="date" class="mb-3">
+              <div class="fw-bold mb-2">{{ date }}</div>
+              <div class="d-flex flex-wrap gap-2">
+                <button
+                  v-for="slot in daySlots"
+                  :key="slot.id"
+                  class="btn btn-sm"
+                  :class="slotClass(slot)"
+                  :disabled="slot.booked || slot.past || slot.mine || hasBooked(selectedSkill)"
+                  :title="slotNote(slot)"
+                  @click="chooseSlot(slot)"
+                >
+                  {{ slot.time }}
+                  <small v-if="slot.mine">(yours)</small>
+                  <small v-else-if="slot.past">(started)</small>
+                  <small v-else-if="slot.booked">(full)</small>
+                  <small v-else>({{ slot.spotsLeft }} left)</small>
+                </button>
+              </div>
+            </div>
+
+            <p v-if="selectedSkill.slots.length === 0" class="text-muted">
+              This coach has no available times yet.
+            </p>
+
+            <!-- Step 2: confirm -->
+            <div v-if="chosenSlot" class="border rounded p-3 mt-3">
+              <p class="fw-semibold mb-1">{{ selectedSkill.title }}: starts {{ chosenSlot.date }} at {{ chosenSlot.time }}</p>
+              <p class="small mb-1">
+                Cost: <strong>{{ selectedSkill.creditCost }} credit{{ selectedSkill.creditCost === 1 ? '' : 's' }}</strong>
+                (you have {{ credits }}). The credit is held until you and the teacher both mark the course finished.
+              </p>
+              <p v-if="chosenSlot.cancellable" class="small text-muted mb-2">
+                You can cancel for a full refund until {{ formatTime(chosenSlot.cancelBefore) }}.
+              </p>
+              <p v-else class="small text-danger mb-2">
+                This starts in less than 24 hours, so once booked it cannot be cancelled.
+              </p>
+              <p v-if="credits < selectedSkill.creditCost" class="small text-danger mb-2">
+                You do not have enough credits. Teach a course to earn some.
+              </p>
+              <p v-if="bookingsStore.actionError" class="small text-danger mb-2">{{ bookingsStore.actionError }}</p>
+
+              <button
+                class="btn btn-brand me-2"
+                :disabled="bookingsStore.booking || credits < selectedSkill.creditCost"
+                @click="confirmBooking"
+              >
+                {{ bookingsStore.booking ? 'Booking...' : 'Confirm booking' }}
+              </button>
+              <button class="btn btn-outline-secondary" @click="chosenSlotId = ''">Choose another time</button>
+            </div>
+
+            <p v-else-if="bookingsStore.actionError" class="small text-danger mt-2">{{ bookingsStore.actionError }}</p>
+          </template>
         </div>
       </div>
     </div>

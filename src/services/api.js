@@ -97,3 +97,36 @@ export async function deleteGoal(id) {
   const response = await axios.delete(API + '/learn-goals/' + id, await authConfig())
   return response.data
 }
+
+// ---------- Bookings ----------
+// Book one start time of a course. -> { booking, offer }
+// (the slot id looks like "2026-11-08-14:00", so it is encoded to be safe in the address)
+export async function bookSlot(offerId, slotId) {
+  const url = API + '/offers/' + offerId + '/slots/' + encodeURIComponent(slotId) + '/book'
+  const response = await axios.post(url, {}, await authConfig())
+  return response.data
+}
+
+// every booking I am part of, as a student or as a teacher (each has a "role")
+export async function getMyBookings() {
+  const response = await axios.get(API + '/bookings/mine', await authConfig())
+  return response.data
+}
+
+// -> { booking, offer }
+export async function cancelBooking(id) {
+  const response = await axios.post(API + '/bookings/' + id + '/cancel', {}, await authConfig())
+  return response.data
+}
+
+// -> { booking }
+export async function confirmBooking(id) {
+  const response = await axios.post(API + '/bookings/' + id + '/confirm', {}, await authConfig())
+  return response.data
+}
+
+// -> { booking }
+export async function reportBooking(id, reason) {
+  const response = await axios.post(API + '/bookings/' + id + '/report', { reason: reason }, await authConfig())
+  return response.data
+}
