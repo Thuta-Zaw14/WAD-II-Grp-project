@@ -23,7 +23,11 @@ async function authConfig() {
 }
 
 export async function createProfile() {
-  const response = await axios.post(API + '/users', {}, await authConfig())
+  // If this person came from a friend's invite link, the login page saved the friend's code
+  // (see LoginPage.vue). It is sent once, when the profile is first created.
+  const inviteRef = localStorage.getItem('inviteRef')
+  const response = await axios.post(API + '/users', { ref: inviteRef }, await authConfig())
+  localStorage.removeItem('inviteRef')
   return response.data
 }
 
@@ -128,5 +132,12 @@ export async function confirmBooking(id) {
 // -> { booking }
 export async function reportBooking(id, reason) {
   const response = await axios.post(API + '/bookings/' + id + '/report', { reason: reason }, await authConfig())
+  return response.data
+}
+
+// ---------- Insights ----------
+// Totals worked out by the server: { totalLearners, skills, weekly, invite }
+export async function getInsights() {
+  const response = await axios.get(API + '/insights', await authConfig())
   return response.data
 }

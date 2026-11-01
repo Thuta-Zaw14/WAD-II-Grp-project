@@ -12,3 +12,12 @@ export const MAX_STAGES = 12
 export function calcCreditCost({ mode, equipmentOption }) {
   return 1 + (mode === 'physical' && equipmentOption === 'provided' ? 1 : 0)
 }
+
+// ---------- Invite a friend ----------
+// The one place credits ARE created: a small, capped reward. When a person who was invited
+// finishes their FIRST course, the person who invited them is paid. Each person can be
+// rewarded for at most MAX_REFERRAL_REWARDS friends. The friend already starts with 2 credits,
+// so they get nothing extra by default (set REFERRAL_REWARD_FRIEND to 1 to change that).
+export const MAX_REFERRAL_REWARDS = 2
+export const REFERRAL_REWARD_INVITER = 1
+export const REFERRAL_REWARD_FRIEND = 0

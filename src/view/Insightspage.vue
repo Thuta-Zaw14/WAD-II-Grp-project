@@ -2,6 +2,8 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import Chart from 'chart.js/auto'
+import { auth } from '../firebase'
+import { getInsights, errorText } from '../services/api'
 
 const router = useRouter()
 
@@ -9,21 +11,11 @@ function goHome() {
   router.push('/home')
 }
 
-// Fake data for now 
-// learners = people who want to learn the skill, teachers = people who teach it
-const skillStats = ref([
-  { skill: 'Python intro', category: 'Tech', learners: 24, teachers: 2 },
-  { skill: 'Tennis', category: 'Sports', learners: 18, teachers: 3 },
-  { skill: 'Guitar basics', category: 'Music', learners: 15, teachers: 1 },
-  { skill: 'Photo editing', category: 'Creative', learners: 12, teachers: 2 },
-  { skill: 'Excel basics', category: 'Tech', learners: 11, teachers: 3 },
-  { skill: 'Videography', category: 'Creative', learners: 9, teachers: 1 },
-  { skill: 'Basketball', category: 'Sports', learners: 8, teachers: 4 },
-])
-
-// Bookings made each week (for the line chart)
-const weekLabels = ['Wk 1', 'Wk 2', 'Wk 3', 'Wk 4', 'Wk 5', 'Wk 6', 'Wk 7', 'Wk 8']
-const weeklyBookings = [3, 5, 4, 8, 11, 9, 14, 18]
+// ---------- Load the totals from the server ----------
+// The server counts everybody's skills and bookings and sends back totals only.
+const stats = ref(null) // null until loaded: { totalLearners, skills, weekly, invite }
+const loading = ref(true)
+const error = ref('')
 
 // Same genre colours as the home page
 const genres = ['Sports', 'Creative', 'Music', 'Tech']
@@ -34,17 +26,21 @@ const categoryColors = {
   Tech: '#4a7c59',
 }
 
-// ---------- Numbers worked out from the data ----------
-const totalLearners = computed(() => skillStats.value.reduce((sum, s) => sum + s.learners, 0))
+// learners = people who want to learn the skill, teachers = people who teach it
+const skillStats = computed(() => (stats.value ? stats.value.skills : []))
+const totalLearners = computed(() => (stats.value ? stats.value.totalLearners : 0))
 
+// ---------- Numbers worked out from the data ----------
 // The 5 skills with the most learners
 const topSkills = computed(() => {
-  const sorted = [...skillStats.value].sort((a, b) => b.learners - a.learners)
-  return sorted.slice(0, 5)
+  const wanted = skillStats.value.filter((s) => s.learners > 0)
+  return wanted.slice(0, 5) // the server already sorted them, most learners first
 })
 
 // The longest bar is 100% wide, the others are shown relative to it
-const maxLearners = computed(() => topSkills.value[0].learners)
+const maxLearners = computed(() => (topSkills.value.length > 0 ? topSkills.value[0].learners : 1))
+
+const mostWanted = computed(() => (topSkills.value.length > 0 ? topSkills.value[0].skill : '-'))
 
 // Total learners for each genre
 const genreTotals = computed(() => {
@@ -64,29 +60,38 @@ const topGenre = computed(() => {
   for (const g of genreTotals.value) {
     if (g.total > best.total) best = g
   }
-  return best.genre
+  return best.total > 0 ? best.genre : '-'
 })
 
-// Skills with the most learners for each teacher = where teachers are needed most
+// Skills with the most learners for each teacher = where teachers are needed most.
+// A skill with no teacher yet counts as one teacher, so it is not divided by zero.
 const gaps = computed(() => {
   const list = []
   for (const s of skillStats.value) {
-    list.push({ ...s, ratio: s.learners / s.teachers })
+    if (s.learners > 0) {
+      list.push({ ...s, ratio: s.learners / Math.max(s.teachers, 1) })
+    }
   }
-  list.sort((a, b) => b.ratio - a.ratio)
+  list.sort((a, b) => b.ratio - a.ratio || b.learners - a.learners)
   return list.slice(0, 3)
 })
 
+const bookingsTotal = computed(() => {
+  let total = 0
+  if (stats.value) {
+    for (const count of stats.value.weekly.counts) total += count
+  }
+  return total
+})
+
 // ---------- Invite a friend ----------
-const inviteCode = 'KONGSI-A1B2C3'
-const inviteLink = window.location.origin + '/signup?ref=' + inviteCode
-const friendsJoined = 2
-const creditsEarned = 2
+const inviteLink = ref('')
 const copied = ref(false)
+const invite = computed(() => (stats.value ? stats.value.invite : null))
 
 async function copyLink() {
   try {
-    await navigator.clipboard.writeText(inviteLink)
+    await navigator.clipboard.writeText(inviteLink.value)
     copied.value = true
   } catch (error) {
     console.error('Could not copy:', error.message)
@@ -99,7 +104,9 @@ const lineEl = ref(null)
 let pieChart = null
 let lineChart = null
 
-onMounted(() => {
+function drawCharts() {
+  if (!stats.value || !pieEl.value || !lineEl.value) return // nothing loaded, or the page was left
+
   // Doughnut: learners per genre
   const labels = []
   const values = []
@@ -120,11 +127,11 @@ onMounted(() => {
   lineChart = new Chart(lineEl.value, {
     type: 'line',
     data: {
-      labels: weekLabels,
+      labels: stats.value.weekly.labels,
       datasets: [
         {
           label: 'Bookings',
-          data: weeklyBookings,
+          data: stats.value.weekly.counts,
           borderColor: '#b5835a',
           backgroundColor: 'rgba(181, 131, 90, 0.15)',
           fill: true,
@@ -135,14 +142,32 @@ onMounted(() => {
     options: {
       maintainAspectRatio: false,
       plugins: { legend: { display: false } },
-      scales: { y: { beginAtZero: true } },
+      scales: { y: { beginAtZero: true, ticks: { precision: 0 } } }, // whole bookings only
     },
   })
+}
+
+onMounted(async () => {
+  await auth.authStateReady() // wait until Firebase has restored the login
+  if (!auth.currentUser) {
+    router.push('/login')
+    return
+  }
+  // the invite link carries my uid: a new person who signs up with it is linked to me
+  inviteLink.value = window.location.origin + '/login?ref=' + auth.currentUser.uid
+
+  try {
+    stats.value = await getInsights()
+  } catch (err) {
+    error.value = 'Could not load the insights: ' + errorText(err)
+  }
+  loading.value = false
+  drawCharts()
 })
 
 onUnmounted(() => {
-  pieChart.destroy()
-  lineChart.destroy()
+  if (pieChart) pieChart.destroy()
+  if (lineChart) lineChart.destroy()
 })
 </script>
 
@@ -158,20 +183,23 @@ onUnmounted(() => {
       <p class="mb-0">See what people want to learn, and where teachers are needed most.</p>
     </div>
 
+    <p v-if="loading" class="text-muted">Loading the insights...</p>
+    <p v-else-if="error" class="text-danger">{{ error }}</p>
+
     <!-- Summary numbers -->
     <div class="row g-3 mb-4">
       <div class="col-12 col-md-4">
         <div class="card">
           <div class="card-body text-center">
             <div class="fs-2 fw-bold">{{ totalLearners }}</div>
-            <small class="text-muted">learners looking for skills</small>
+            <small class="text-muted">people looking to learn a skill</small>
           </div>
         </div>
       </div>
       <div class="col-12 col-md-4">
         <div class="card">
           <div class="card-body text-center">
-            <div class="fs-2 fw-bold">{{ topSkills[0].skill }}</div>
+            <div class="fs-2 fw-bold">{{ mostWanted }}</div>
             <small class="text-muted">most wanted skill</small>
           </div>
         </div>
@@ -193,10 +221,14 @@ onUnmounted(() => {
           <div class="card-body">
             <h2 class="h5 mb-3">Top skills in demand</h2>
 
+            <p v-if="topSkills.length === 0" class="text-muted small mb-0">
+              No data yet. Skills show up here once people add them under "Skills I want to learn".
+            </p>
+
             <div v-for="s in topSkills" :key="s.skill" class="mb-3">
               <div class="d-flex justify-content-between small mb-1">
                 <span>{{ s.skill }}</span>
-                <span class="text-muted">{{ s.learners }} learners</span>
+                <span class="text-muted">{{ s.learners }} {{ s.learners === 1 ? 'learner' : 'learners' }}</span>
               </div>
               <div class="bar-track rounded">
                 <div
@@ -216,6 +248,7 @@ onUnmounted(() => {
         <div class="card h-100">
           <div class="card-body">
             <h2 class="h5 mb-3">Demand by genre</h2>
+            <p v-if="!loading && totalLearners === 0" class="text-muted small">No data yet.</p>
             <div class="chart-box">
               <canvas ref="pieEl"></canvas>
             </div>
@@ -227,7 +260,11 @@ onUnmounted(() => {
     <!-- Bookings over time (line) -->
     <div class="card mb-4">
       <div class="card-body">
-        <h2 class="h5 mb-3">Bookings per week</h2>
+        <h2 class="h5 mb-1">Bookings per week</h2>
+        <p class="text-muted small mb-3">
+          The last 8 weeks. Each point is one week, named after its first day.
+          <span v-if="!loading && bookingsTotal === 0">No bookings yet.</span>
+        </p>
         <div class="chart-box">
           <canvas ref="lineEl"></canvas>
         </div>
@@ -242,6 +279,8 @@ onUnmounted(() => {
             <h2 class="h5 mb-1">Teachers needed</h2>
             <p class="text-muted small mb-3">Skills with the most learners for each teacher.</p>
 
+            <p v-if="gaps.length === 0" class="text-muted small">No data yet.</p>
+
             <div
               v-for="g in gaps"
               :key="g.skill"
@@ -249,8 +288,8 @@ onUnmounted(() => {
             >
               <span>{{ g.skill }}</span>
               <small class="text-muted">
-                {{ g.learners }} learners, {{ g.teachers }}
-                {{ g.teachers === 1 ? 'teacher' : 'teachers' }}
+                {{ g.learners }} {{ g.learners === 1 ? 'learner' : 'learners' }},
+                {{ g.teachers === 0 ? 'no teachers yet' : g.teachers + (g.teachers === 1 ? ' teacher' : ' teachers') }}
               </small>
             </div>
 
@@ -265,17 +304,24 @@ onUnmounted(() => {
         <div class="card h-100">
           <div class="card-body">
             <h2 class="h5 mb-1">Invite a friend</h2>
-            <p class="text-muted small mb-3">
-              You and your friend each get 1 credit when they finish their first session.
+            <p v-if="invite" class="text-muted small mb-3">
+              When a friend you invited finishes their first course, you earn
+              {{ invite.rewardInviter }} credit{{ invite.rewardInviter === 1 ? '' : 's' }}.
+              <template v-if="invite.rewardFriend > 0">
+                They earn {{ invite.rewardFriend }} too.
+              </template>
+              This works for up to {{ invite.max }} friends.
             </p>
 
             <input :value="inviteLink" type="text" class="form-control mb-2" readonly />
-            <button class="btn btn-brand w-100 mb-3" @click="copyLink">
+            <button class="btn btn-brand w-100 mb-3" :disabled="inviteLink === ''" @click="copyLink">
               {{ copied ? 'Copied!' : 'Copy invite link' }}
             </button>
 
-            <small class="text-muted">
-              Friends who joined: {{ friendsJoined }} · Credits earned: {{ creditsEarned }}
+            <small v-if="invite" class="text-muted">
+              Friends who joined: {{ invite.friendsJoined }} ·
+              Friends rewarded: {{ invite.rewarded }} of {{ invite.max }} ·
+              Credits earned: {{ invite.creditsEarned }}
             </small>
           </div>
         </div>

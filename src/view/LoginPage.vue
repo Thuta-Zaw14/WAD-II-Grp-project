@@ -5,14 +5,26 @@ import {
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
 } from 'firebase/auth'
-import { useRouter } from 'vue-router'
+import { useRouter, useRoute } from 'vue-router'
 
 import loginImg from '../assets/login.jpg'
 import signupImg from '../assets/signup.jpg'
 
 const router = useRouter()
+const route = useRoute()
 
-const isSignup = ref(false)
+// An invite link looks like /login?ref=<the friend's code>. Remember the code until the new
+// profile is created (services/api.js sends it then). Opening the login page WITHOUT a code
+// forgets any old one, so nobody gets credited to a friend they never followed.
+const inviteCode = typeof route.query.ref === 'string' ? route.query.ref : ''
+if (inviteCode !== '') {
+  localStorage.setItem('inviteRef', inviteCode)
+} else {
+  localStorage.removeItem('inviteRef')
+}
+
+// someone who followed an invite link most likely needs to sign up
+const isSignup = ref(inviteCode !== '')
 const isError = ref(false)
 
 const email = ref('')
@@ -33,6 +45,7 @@ async function submit() {
       message.value = 'Account created for ' + result.user.email
     } else {
       const result = await signInWithEmailAndPassword(auth, email.value, password.value)
+      localStorage.removeItem('inviteRef') // an existing account cannot be invited
       message.value = 'Logged in as ' + result.user.email
     }
     router.push('/home')
@@ -57,6 +70,10 @@ async function submit() {
       <div class="col-12 col-md-6 form-side d-flex align-items-center justify-content-center p-3 p-md-4">
         <form class="card border-0 shadow w-100 p-4 p-md-5" @submit.prevent="submit">
           <h2 class="h4 mb-4">{{ isSignup ? 'Sign up' : 'Login' }}</h2>
+
+          <p v-if="isSignup && inviteCode !== ''" class="small text-muted mb-3">
+            A friend invited you to Kongsi. Sign up to start teaching and learning.
+          </p>
 
           <div class="mb-3">
             <label for="email" class="form-label fw-semibold">Email</label>

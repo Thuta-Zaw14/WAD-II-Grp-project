@@ -91,6 +91,19 @@ function cleanSkills(list) {
   return result
 }
 
+// An invite link carries the uid of the person who sent it (see LoginPage.vue).
+// Returns that uid if it belongs to a real, different user, otherwise ''.
+// A bad or made-up code is simply ignored: the new person still gets their profile.
+async function findInviter(code, ownUid) {
+  if (typeof code !== 'string') return ''
+  const inviterUid = code.trim()
+  if (inviterUid === '' || inviterUid.length > 128 || inviterUid.includes('/')) return ''
+  if (inviterUid === ownUid) return ''
+
+  const inviter = await db.collection('users').doc(inviterUid).get()
+  return inviter.exists ? inviterUid : ''
+}
+
 // Create the profile if it does not exist yet (safe to call on every login)
 // The document id is the Firebase uid, so we never need to search for a user.
 router.post('/', verifyToken, async (req, res) => {
@@ -109,6 +122,7 @@ router.post('/', verifyToken, async (req, res) => {
     credits: 2,
     skillsTeach: [],
     skillsLearn: [],
+    referredBy: await findInviter(req.body.ref, req.user.uid), // who invited this person ('' = nobody)
     createdAt: new Date().toISOString(),
   }
 

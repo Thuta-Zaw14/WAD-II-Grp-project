@@ -7,7 +7,8 @@
 //                         given to the teacher). The clock then moves it through
 //                         upcoming / in progress / ready to finish (see bookingRules.js).
 //   status 'finished'  -> the student AND the teacher confirmed. The teacher gets the credit
-//                         and the student gets a skill card.
+//                         and the student gets a skill card. If the student was invited by a friend
+//                         and this is their first finished course, the friend is rewarded too.
 //   status 'cancelled' -> the student cancelled at least 24 hours before the start. Refunded.
 //   status 'disputed'  -> someone reported a problem. The credit stays held until it is sorted
 //                         out by hand in the Firestore console.
@@ -21,6 +22,7 @@
 // Every function returns { booking, offer } on success or { status, error } when the
 // request is not allowed (status is the HTTP code the route sends back).
 import { db } from '../config/firebaseAdmin.js'
+import { MAX_REFERRAL_REWARDS, REFERRAL_REWARD_INVITER, REFERRAL_REWARD_FRIEND } from '../config/credits.js'
 import { slotMoment, cancelDeadline, finishTime, singaporeDate, describeMoment, roleOf, phaseOf } from './bookingRules.js'
 
 function fail(status, message) {
@@ -220,12 +222,25 @@ export async function confirmBooking(uid, bookingId) {
     changes[myFlag] = true
     const bothConfirmed = booking[otherFlag] === true
 
-    // the teacher's account is only needed when this confirmation completes the pair
+    // The other accounts are only needed when this confirmation completes the pair:
+    // the teacher (gets paid), the student, and the person who invited the student (if any).
     const teacherRef = db.collection('users').doc(booking.teacherUid)
+    const learnerRef = db.collection('users').doc(booking.learnerUid)
     let teacherSnap = null
+    let learnerSnap = null
+    let inviterRef = null
+    let inviterSnap = null
     if (bothConfirmed) {
       teacherSnap = await t.get(teacherRef)
       if (!teacherSnap.exists) return fail(409, "The teacher's account could not be found.")
+
+      learnerSnap = await t.get(learnerRef)
+      const learner = learnerSnap.exists ? learnerSnap.data() : {}
+      // a student who was invited, and has not finished a course before, is on their first one now
+      if (learner.referredBy && learner.referralRewarded !== true) {
+        inviterRef = db.collection('users').doc(learner.referredBy)
+        inviterSnap = await t.get(inviterRef)
+      }
     }
 
     // --- writes ---
@@ -233,8 +248,34 @@ export async function confirmBooking(uid, bookingId) {
       changes.status = 'finished'
       changes.finishedAt = now.toISOString()
 
+      // Credits to add to each person. Everybody is updated ONCE (a teacher can also be the
+      // person who invited the student), so the changes are collected here first.
+      const people = {}
+      function pay(uid, ref, snap, credits, extraFields) {
+        if (!people[uid]) people[uid] = { ref: ref, credits: snap.data().credits || 0, fields: {} }
+        people[uid].credits += credits
+        Object.assign(people[uid].fields, extraFields)
+      }
+
       // the held credit goes to the teacher
-      t.update(teacherRef, { credits: (teacherSnap.data().credits || 0) + booking.creditCost })
+      pay(booking.teacherUid, teacherRef, teacherSnap, booking.creditCost, {})
+
+      // Invite a friend: the first finished course of an invited student rewards whoever invited
+      // them, up to MAX_REFERRAL_REWARDS friends. The student's first course counts as "used" either
+      // way, so a full inviter does not get paid later either.
+      if (inviterSnap !== null) {
+        const rewardsSoFar = inviterSnap.exists ? inviterSnap.data().referralsRewarded || 0 : 0
+        const inviterIsPaid = inviterSnap.exists && rewardsSoFar < MAX_REFERRAL_REWARDS
+
+        pay(booking.learnerUid, learnerRef, learnerSnap, inviterIsPaid ? REFERRAL_REWARD_FRIEND : 0, { referralRewarded: true })
+        if (inviterIsPaid) {
+          pay(inviterRef.id, inviterRef, inviterSnap, REFERRAL_REWARD_INVITER, { referralsRewarded: rewardsSoFar + 1 })
+        }
+      }
+
+      for (const uid of Object.keys(people)) {
+        t.update(people[uid].ref, { ...people[uid].fields, credits: people[uid].credits })
+      }
 
       // the student's reward: a skill card (same id as the booking, so it can never be made twice)
       t.set(db.collection('skillCards').doc(bookingId), {

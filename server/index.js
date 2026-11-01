@@ -6,6 +6,7 @@ import offerRoutes from './routes/offers.js'
 import optionRoutes from './routes/options.js'
 import learnGoalRoutes from './routes/learnGoals.js'
 import bookingRoutes from './routes/bookings.js'
+import insightRoutes from './routes/insights.js'
 
 const app = express()
 
@@ -18,6 +19,7 @@ app.use('/api/offers', offerRoutes)
 app.use('/api/options', optionRoutes)
 app.use('/api/learn-goals', learnGoalRoutes)
 app.use('/api/bookings', bookingRoutes)
+app.use('/api/insights', insightRoutes)
 
 const port = process.env.PORT || 3000
 
