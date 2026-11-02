@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { auth } from '../firebase'
 import { useProfileStore } from '../stores/profile'
@@ -48,6 +48,12 @@ onMounted(async () => {
   if (!auth.currentUser) return
   uid.value = auth.currentUser.uid
   loadTutorialState()
+  // only animate opening and closing from now on, so a tutorial saved as hidden does not
+  // visibly fold shut as the page loads
+  await nextTick()
+  requestAnimationFrame(() => {
+    animate.value = true
+  })
   profileStore.fetchProfile()
   profileStore.fetchMyCourses()
   bookingsStore.fetchBookings()
@@ -59,6 +65,7 @@ onMounted(async () => {
 // What you clicked and whether the tutorial is hidden is remembered in this browser, per account.
 const visited = ref([]) // keys of steps whose button was pressed
 const hidden = ref(false)
+const animate = ref(false) // false while the page is still loading the saved state
 const current = ref(0) // index of the step shown in the panel
 
 function storageKey() {
@@ -173,12 +180,17 @@ function showTutorial() {
   jumpToNext()
 }
 
+function toggleTutorial() {
+  if (hidden.value) showTutorial()
+  else hideTutorial()
+}
+
 // ---------- Shortcuts ----------
 const shortcuts = [
-  { icon: '🔍', title: 'Browse courses', text: 'Find something new to learn near you.', to: '/courses' },
-  { icon: '📚', title: 'My classes', text: 'Chats, progress and reflections.', to: '/classes' },
+  { icon: '🔍', title: 'Browse Courses', text: 'Find something new to learn near you.', to: '/courses' },
+  { icon: '📚', title: 'My Classes', text: 'Chats, progress and reflections.', to: '/classes' },
   { icon: '📈', title: 'Insights', text: 'Your learning and teaching over time.', to: '/insights' },
-  { icon: '✏️', title: 'Teach a skill', text: 'Share what you know and earn credits.', to: '/teach/new' },
+  { icon: '✏️', title: 'Teach a Skill', text: 'Share what you know and earn credits.', to: '/teach/new' },
 ]
 </script>
 
@@ -227,90 +239,107 @@ const shortcuts = [
       </div>
     </section>
 
-    <!-- Getting-started tutorial -->
-    <section v-if="!hidden" class="k-card tutorial p-3 p-md-4 mb-4" aria-labelledby="tutorial-title">
-      <div class="d-flex align-items-start justify-content-between gap-3 mb-3">
+    <!-- Getting-started tutorial. The header always shows; the steps fold open and shut.
+         Once every step is done only the header and the "well done" message are left. -->
+    <section class="k-card tutorial p-3 p-md-4 mb-4" aria-labelledby="tutorial-title">
+      <div class="d-flex align-items-center justify-content-between flex-wrap gap-3">
         <div>
           <h2 id="tutorial-title" class="h4 mb-1">Getting started with Kongsi</h2>
           <p class="small text-muted mb-0">{{ doneCount }} of {{ steps.length }} steps done</p>
         </div>
-        <button type="button" class="btn btn-sm btn-outline-secondary" @click="hideTutorial">Hide tutorial</button>
+        <button
+          v-if="!allDone"
+          type="button"
+          class="tutorial-toggle"
+          :aria-expanded="!hidden"
+          aria-controls="tutorial-body"
+          @click="toggleTutorial"
+        >
+          {{ hidden ? 'Show tutorial' : 'Hide tutorial' }}
+          <span class="toggle-chevron" aria-hidden="true">▾</span>
+        </button>
       </div>
 
-      <div
-        class="progress mb-4"
-        role="progressbar"
-        :aria-valuenow="progress"
-        aria-valuemin="0"
-        aria-valuemax="100"
-        aria-label="Tutorial progress"
-      >
-        <div class="progress-bar" :style="{ width: progress + '%' }"></div>
-      </div>
-
-      <div v-if="allDone" class="alert alert-success d-flex align-items-center gap-2">
+      <div v-if="allDone" class="alert alert-success d-flex align-items-center gap-2 mt-3 mb-0">
         <span aria-hidden="true">🎉</span>
         <span>You've completed every step. You're a true Kongsi member now!</span>
       </div>
 
-      <div class="row g-3">
-        <!-- The list of steps (a row that scrolls sideways on a phone) -->
-        <div class="col-md-4">
-          <ol class="step-list" role="tablist" aria-label="Tutorial steps">
-            <li v-for="(s, i) in steps" :key="s.key">
-              <button
-                type="button"
-                role="tab"
-                class="step-tab"
-                :class="{ active: i === current, done: s.done }"
-                :aria-selected="i === current"
-                @click="current = i"
-              >
-                <span class="check" aria-hidden="true">{{ s.done ? '✓' : i + 1 }}</span>
-                <span class="step-title">{{ s.title }}</span>
-                <span v-if="s.done" class="visually-hidden">(done)</span>
-              </button>
-            </li>
-          </ol>
-        </div>
+      <div
+        v-else
+        id="tutorial-body"
+        class="collapser"
+        :class="{ open: !hidden, animate: animate }"
+        :inert="hidden || undefined"
+      >
+        <div class="collapser-inner">
+          <div
+            class="progress mt-3 mb-4"
+            role="progressbar"
+            :aria-valuenow="progress"
+            aria-valuemin="0"
+            aria-valuemax="100"
+            aria-label="Tutorial progress"
+          >
+            <div class="progress-bar" :style="{ width: progress + '%' }"></div>
+          </div>
 
-        <!-- The step that is open -->
-        <div class="col-md-8">
-          <div class="step-panel h-100" role="tabpanel">
-            <div class="d-flex align-items-center gap-2 mb-2">
-              <span class="step-icon" aria-hidden="true">{{ step.icon }}</span>
-              <span class="eyebrow">Step {{ current + 1 }} of {{ steps.length }}</span>
-              <span v-if="step.done" class="badge rounded-pill text-bg-success ms-auto">Done</span>
+          <div class="row g-3">
+            <!-- The list of steps (a row that scrolls sideways on a phone) -->
+            <div class="col-md-4">
+              <ol class="step-list" role="tablist" aria-label="Tutorial steps">
+                <li v-for="(s, i) in steps" :key="s.key">
+                  <button
+                    type="button"
+                    role="tab"
+                    class="step-tab"
+                    :class="{ active: i === current, done: s.done }"
+                    :aria-selected="i === current"
+                    @click="current = i"
+                  >
+                    <span class="check" aria-hidden="true">{{ s.done ? '✓' : i + 1 }}</span>
+                    <span class="step-title">{{ s.title }}</span>
+                    <span v-if="s.done" class="visually-hidden">(done)</span>
+                  </button>
+                </li>
+              </ol>
             </div>
-            <h3 class="h5 mb-2">{{ step.title }}</h3>
-            <p class="mb-3">{{ step.text }}</p>
-            <p class="tip small mb-3"><strong>Tip:</strong> {{ step.tip }}</p>
 
-            <div class="d-flex flex-wrap align-items-center gap-2">
-              <button type="button" class="btn btn-brand" @click="goToStep(step)">{{ step.action }}</button>
-              <div class="ms-auto d-flex gap-2">
-                <button
-                  type="button"
-                  class="btn btn-sm btn-outline-secondary"
-                  :disabled="current === 0"
-                  @click="current--"
-                >&larr; Back</button>
-                <button
-                  type="button"
-                  class="btn btn-sm btn-outline-secondary"
-                  :disabled="current === steps.length - 1"
-                  @click="current++"
-                >Next &rarr;</button>
+            <!-- The step that is open -->
+            <div class="col-md-8">
+              <div class="step-panel h-100" role="tabpanel">
+                <div class="d-flex align-items-center gap-2 mb-2">
+                  <span class="step-icon" aria-hidden="true">{{ step.icon }}</span>
+                  <span class="eyebrow">Step {{ current + 1 }} of {{ steps.length }}</span>
+                  <span v-if="step.done" class="badge rounded-pill text-bg-success ms-auto">Done</span>
+                </div>
+                <h3 class="h5 mb-2">{{ step.title }}</h3>
+                <p class="mb-3">{{ step.text }}</p>
+                <p class="tip small mb-3"><strong>Tip:</strong> {{ step.tip }}</p>
+
+                <div class="d-flex flex-wrap align-items-center gap-2">
+                  <button type="button" class="btn btn-brand" @click="goToStep(step)">{{ step.action }}</button>
+                  <div class="ms-auto d-flex gap-2">
+                    <button
+                      type="button"
+                      class="btn btn-sm btn-outline-secondary"
+                      :disabled="current === 0"
+                      @click="current--"
+                    >&larr; Back</button>
+                    <button
+                      type="button"
+                      class="btn btn-sm btn-outline-secondary"
+                      :disabled="current === steps.length - 1"
+                      @click="current++"
+                    >Next &rarr;</button>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
         </div>
       </div>
     </section>
-
-    <p v-else class="small mb-4">
-      <a href="#" @click.prevent="showTutorial">Show the getting-started tutorial again</a>
-    </p>
 
     <!-- Shortcuts -->
     <h2 class="h5 mb-3">Jump back in</h2>
@@ -374,6 +403,70 @@ const shortcuts = [
 
 .tutorial h2 {
   color: var(--k-accent);
+}
+
+/* the pill that shows and hides the tutorial */
+.tutorial-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px 6px 16px;
+  border: 1px solid var(--k-border);
+  border-radius: 999px;
+  background: var(--k-surface-alt);
+  color: var(--k-accent);
+  font-size: 14px;
+  font-weight: 600;
+  transition: background-color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.tutorial-toggle:hover {
+  background: var(--k-brand-soft);
+  border-color: var(--k-brand);
+}
+
+.tutorial-toggle:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--k-brand-soft);
+  border-color: var(--k-brand);
+}
+
+.toggle-chevron {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--k-surface);
+  font-size: 11px;
+  transition: transform 0.3s ease;
+}
+
+.tutorial-toggle[aria-expanded='true'] .toggle-chevron {
+  transform: rotate(180deg);
+}
+
+/* Folding the steps open and shut: the grid row grows from 0 to the content's own height,
+   so the animation works whatever the height is. */
+.collapser {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+}
+
+.collapser.open {
+  grid-template-rows: 1fr;
+  opacity: 1;
+}
+
+.collapser.animate {
+  transition: grid-template-rows 0.35s ease, opacity 0.25s ease;
+}
+
+.collapser-inner {
+  min-height: 0;
+  overflow: hidden;
 }
 
 .progress {
@@ -498,7 +591,9 @@ const shortcuts = [
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .progress-bar {
+  .progress-bar,
+  .collapser.animate,
+  .toggle-chevron {
     transition: none;
   }
 }

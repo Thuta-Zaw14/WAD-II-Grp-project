@@ -182,8 +182,9 @@ async function goToStartPage() {
       </h1>
     </header>
 
-    <!-- The photo stays on its side and fades to the other one; the card flips over -->
-    <div class="row g-0">
+    <!-- The photo stays on its side and fades to the other one; the card flips over.
+         On a phone the photo is the background and the card sits on top of it. -->
+    <div class="row g-0 body-row">
       <div class="col-12 col-md-6 image-panel">
         <Transition name="fade">
           <img :key="isSignup" :src="isSignup ? signupImg : loginImg" alt="Students teaching each other" />
@@ -383,6 +384,24 @@ async function goToStartPage() {
 .form-side {
   background: var(--k-bg);
   perspective: 1200px; /* gives the card flip its depth */
+}
+
+/* Phones: the photo fills the whole area behind the card */
+@media (max-width: 767.98px) {
+  .body-row {
+    position: relative;
+  }
+
+  .image-panel {
+    position: absolute;
+    inset: 0;
+    min-height: 0;
+  }
+
+  .form-side {
+    position: relative; /* above the photo */
+    background: transparent;
+  }
 }
 
 /* ---------- Switching between Login and Sign up ----------

@@ -42,7 +42,28 @@ onMounted(async () => {
 onUnmounted(() => {
   unmounted = true
   clearInterval(timer)
+  narrowQuery.removeEventListener('change', onWidthChange)
 })
+
+// ---------- Folding the two lists on narrow screens ----------
+// Below the lg breakpoint the two lists sit on top of each other, so each one is folded down
+// to its class names until its heading is pressed. On wider screens both are always open.
+const narrowQuery = window.matchMedia('(max-width: 991.98px)')
+const isNarrow = ref(narrowQuery.matches)
+function onWidthChange(e) {
+  isNarrow.value = e.matches
+}
+narrowQuery.addEventListener('change', onWidthChange)
+
+const expanded = ref({ attending: false, hosting: false })
+
+function isOpen(section) {
+  return !isNarrow.value || expanded.value[section]
+}
+
+function toggleSection(section) {
+  expanded.value[section] = !expanded.value[section]
+}
 
 // ---------- Small helpers ----------
 // "Sat, 8 Nov, 14:00" in Singapore time
@@ -359,7 +380,7 @@ async function addSlot() {
   <div class="container py-4">
     <div class="p-4 mb-4 banner d-flex justify-content-between align-items-center flex-wrap gap-2">
       <div>
-        <h1 class="h4 mb-1">My classes</h1>
+        <h1 class="h4 mb-1">My Classes</h1>
         <p class="mb-0">The classes you attend and the classes you host. A class is finished when both of you confirm it.</p>
       </div>
       <div class="text-center">
@@ -374,21 +395,34 @@ async function addSlot() {
     <p v-if="profileStore.error" class="alert alert-danger" role="alert">{{ profileStore.error }}</p>
 
     <div class="row g-4">
-      <!-- ========== Classes I am attending ========== -->
+      <!-- ========== Classes I Am Attending ========== -->
       <section class="col-12 col-lg-6" aria-labelledby="attending-title">
-        <div class="k-card p-3 p-md-4 h-100">
+        <div class="k-card p-3 p-md-4 h-100" :class="{ folded: !isOpen('attending') }">
           <p class="eyebrow mb-1">LEARNING</p>
-          <h2 id="attending-title" class="h5 mb-3">Classes I am attending</h2>
+          <h2 id="attending-title" class="h5 mb-3">
+            <button
+              v-if="isNarrow"
+              type="button"
+              class="section-toggle"
+              :aria-expanded="isOpen('attending')"
+              @click="toggleSection('attending')"
+            >
+              Classes I Am Attending
+              <span class="chevron" aria-hidden="true">▾</span>
+            </button>
+            <template v-else>Classes I Am Attending</template>
+          </h2>
 
           <div v-for="b in store.learning" :key="b.id" class="class-row">
             <div class="d-flex justify-content-between align-items-start gap-2">
               <div class="min-w-0">
                 <h3 class="h6 mb-1">{{ b.title }}</h3>
-                <p class="small text-muted mb-1">Taught by {{ b.teacherName }} &middot; starts {{ formatTime(b.startsAt) }}</p>
+                <p v-if="isOpen('attending')" class="small text-muted mb-1">Taught by {{ b.teacherName }} &middot; starts {{ formatTime(b.startsAt) }}</p>
               </div>
-              <span class="status flex-shrink-0" :class="'status-' + b.phase">{{ phaseLabels[b.phase] }}</span>
+              <span v-if="isOpen('attending')" class="status flex-shrink-0" :class="'status-' + b.phase">{{ phaseLabels[b.phase] }}</span>
             </div>
 
+            <template v-if="isOpen('attending')">
             <p v-if="b.removedByTeacher" class="small text-danger mb-2">
               {{ b.teacherName }} removed you from this class: {{ b.removalReason }}
             </p>
@@ -428,6 +462,7 @@ async function addSlot() {
                 </span>
               </button>
             </div>
+            </template>
           </div>
 
           <EmptyState
@@ -440,14 +475,27 @@ async function addSlot() {
         </div>
       </section>
 
-      <!-- ========== Classes I am hosting ========== -->
+      <!-- ========== Classes I Am Hosting ========== -->
       <section class="col-12 col-lg-6" aria-labelledby="hosting-title">
-        <div class="k-card p-3 p-md-4 h-100">
+        <div class="k-card p-3 p-md-4 h-100" :class="{ folded: !isOpen('hosting') }">
           <p class="eyebrow mb-1">TEACHING</p>
-          <h2 id="hosting-title" class="h5 mb-3">Classes I am hosting</h2>
+          <h2 id="hosting-title" class="h5 mb-3">
+            <button
+              v-if="isNarrow"
+              type="button"
+              class="section-toggle"
+              :aria-expanded="isOpen('hosting')"
+              @click="toggleSection('hosting')"
+            >
+              Classes I Am Hosting
+              <span class="chevron" aria-hidden="true">▾</span>
+            </button>
+            <template v-else>Classes I Am Hosting</template>
+          </h2>
 
           <div v-for="offer in profileStore.myOffers" :key="offer.id" class="class-row">
             <h3 class="h6 mb-1">{{ offer.title }}</h3>
+            <template v-if="isOpen('hosting')">
             <p class="small text-muted mb-2">
               {{ activeStudentCount(offer.id) }} student{{ activeStudentCount(offer.id) === 1 ? '' : 's' }}
               &middot;
@@ -467,6 +515,7 @@ async function addSlot() {
               <button type="button" class="btn btn-sm btn-brand" @click="openSlot(offer)">Add time slot</button>
               <button type="button" class="btn btn-sm btn-link" @click="router.push('/teach/' + offer.id)">Edit course</button>
             </div>
+            </template>
           </div>
 
           <EmptyState
@@ -759,6 +808,37 @@ async function addSlot() {
 
 .min-w-0 {
   min-width: 0;
+}
+
+/* the heading button that folds a list open and shut on narrow screens */
+.section-toggle {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+
+.chevron {
+  transition: transform 0.2s ease;
+}
+
+.section-toggle[aria-expanded='true'] .chevron {
+  transform: rotate(180deg);
+}
+
+/* a folded list only shows the class names, so the rows sit closer together */
+.folded .class-row {
+  padding: 8px 0;
+}
+
+.folded .class-row:first-of-type {
+  padding-top: 0;
 }
 
 .stage-bar {
