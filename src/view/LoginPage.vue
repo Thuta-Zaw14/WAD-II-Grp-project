@@ -101,7 +101,7 @@ async function checkCode() {
 
 async function saveNewPassword() {
   clearResetErrors()
-  if (reset.password.length < 8) resetErrors.password = 'Use at least 8 characters.'
+  if (reset.password.length < 6) resetErrors.password = 'Your password must be at least 6 characters long.'
   if (reset.repeat === '') resetErrors.repeat = 'Please enter the password again.'
   else if (reset.repeat !== reset.password) resetErrors.repeat = 'The two passwords do not match.'
   if (resetErrors.password || resetErrors.repeat) return
@@ -272,7 +272,7 @@ async function goToStartPage() {
                 autocomplete="new-password"
               />
               <div v-if="resetErrors.password" id="reset-password-error" class="invalid-feedback d-block">{{ resetErrors.password }}</div>
-              <small v-else id="reset-password-help" class="text-muted">At least 8 characters.</small>
+              <small v-else id="reset-password-help" class="text-muted">At least 6 characters.</small>
             </div>
 
             <div class="mb-3">
