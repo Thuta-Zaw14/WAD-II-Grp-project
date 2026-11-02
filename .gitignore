@@ -41,3 +41,4 @@ __screenshots__/
 #env
 .env
 server/firebaseKey.json
+server/*-firebase-adminsdk-*.json
