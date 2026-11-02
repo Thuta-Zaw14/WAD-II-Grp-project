@@ -135,9 +135,9 @@ function validateDescription() {
 }
 
 const checks = {
-  title: { check: validateTitle, label: 'Report title' },
+  title: { check: validateTitle, label: 'Report Title' },
   type: { check: validateType, label: 'Type' },
-  target: { check: validateTarget, label: 'Member or course' },
+  target: { check: validateTarget, label: '' }, // 'Member' or 'Course', from targetBox
   description: { check: validateDescription, label: 'Description' },
 }
 
@@ -152,7 +152,7 @@ function validateForm() {
   const invalidFields = []
   for (const field in checks) {
     fieldErrors[field] = checks[field].check()
-    if (fieldErrors[field]) invalidFields.push(checks[field].label)
+    if (fieldErrors[field]) invalidFields.push(field === 'target' ? targetBox.value.label : checks[field].label)
   }
   summaryError.value = invalidFields.length ? 'Please correct these fields: ' + listOf(invalidFields) + '.' : ''
   return invalidFields.length === 0
