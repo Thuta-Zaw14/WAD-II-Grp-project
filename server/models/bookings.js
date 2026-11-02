@@ -9,7 +9,8 @@
 //   status 'finished'  -> the student AND the teacher confirmed. The teacher gets the credit
 //                         and the student gets a skill card. If the student was invited by a friend
 //                         and this is their first finished course, the friend is rewarded too.
-//   status 'cancelled' -> the student cancelled at least 24 hours before the start. Refunded.
+//   status 'cancelled' -> the student cancelled at least 24 hours before the start, or the
+//                         teacher removed the student from the class (cancelledBy 'teacher'). Refunded.
 //   status 'disputed'  -> someone reported a problem. The credit stays held until an admin settles
 //                         it (Disputes tab of the admin page): either the teacher is paid (the
 //                         booking becomes 'finished', with resolution 'teacher-paid') or the
@@ -295,6 +296,61 @@ export async function cancelBooking(uid, bookingId) {
     }
 
     return { booking: { id: bookingId, ...booking, ...changes }, offer: offer }
+  })
+}
+
+// ---------- The teacher removes a student from the class (any time while it is active) ----------
+// The student gets the full refund and the seat is freed, the same as a cancel.
+// The reason is kept on the booking so the student can see why.
+export async function removeStudent(uid, bookingId, reason) {
+  const bookingRef = db.collection('bookings').doc(bookingId)
+
+  return db.runTransaction(async (t) => {
+    const bookingSnap = await t.get(bookingRef)
+    if (!bookingSnap.exists) return fail(404, 'Booking not found.')
+    const booking = bookingSnap.data()
+
+    if (booking.teacherUid !== uid) return fail(403, 'Only the teacher can remove a student.')
+    if (booking.status !== 'booked') return fail(409, 'This booking is ' + booking.status + '.')
+
+    const offerRef = db.collection('offers').doc(booking.offerId)
+    const learnerRef = db.collection('users').doc(booking.learnerUid)
+    const offerSnap = await t.get(offerRef)
+    const learnerSnap = await t.get(learnerRef)
+
+    // --- writes ---
+    const now = new Date().toISOString()
+    const changes = {
+      status: 'cancelled',
+      cancelledAt: now,
+      cancelledBy: 'teacher',
+      removalReason: reason,
+      updatedAt: now,
+    }
+    t.update(bookingRef, changes)
+
+    if (learnerSnap.exists) {
+      t.update(learnerRef, { credits: (learnerSnap.data().credits || 0) + booking.creditCost }) // refund
+    }
+
+    if (offerSnap.exists) {
+      // free the seat: take the student's uid off the slot
+      const newSlots = []
+      for (const slot of offerSnap.data().slots || []) {
+        if (slot.id === booking.slotId) {
+          const stillBooked = []
+          for (const other of bookedByOf(slot)) {
+            if (other !== booking.learnerUid) stillBooked.push(other)
+          }
+          newSlots.push({ ...slot, bookedBy: stillBooked })
+        } else {
+          newSlots.push(slot)
+        }
+      }
+      t.update(offerRef, { slots: newSlots })
+    }
+
+    return { booking: { id: bookingId, ...booking, ...changes } }
   })
 }
 

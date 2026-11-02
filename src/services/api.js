@@ -80,6 +80,12 @@ export async function createOffer(offer) {
   return response.data
 }
 
+// Add one start time to my course -> the course, with the new slot
+export async function addSlot(offerId, date, time) {
+  const response = await axios.post(API + '/offers/' + offerId + '/slots', { date: date, time: time }, await authConfig())
+  return response.data
+}
+
 // -> { offer, removedPaths }
 export async function updateOffer(id, offer) {
   const response = await axios.put(API + '/offers/' + id, offer, await authConfig())
@@ -155,6 +161,12 @@ export async function cancelBooking(id) {
 // -> { booking }
 export async function confirmBooking(id) {
   const response = await axios.post(API + '/bookings/' + id + '/confirm', {}, await authConfig())
+  return response.data
+}
+
+// The teacher removes a student from the class -> { booking }
+export async function removeStudent(id, reason) {
+  const response = await axios.post(API + '/bookings/' + id + '/remove', { reason: reason }, await authConfig())
   return response.data
 }
 

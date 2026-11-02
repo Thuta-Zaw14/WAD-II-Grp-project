@@ -37,7 +37,7 @@ const statusLabels = {
 const heading = computed(() => (info.value ? 'Chat with ' + info.value.otherName : 'Chat'))
 
 function goBack() {
-  router.push('/sessions')
+  router.push('/classes')
 }
 </script>
 
@@ -45,7 +45,7 @@ function goBack() {
   <NavBar />
 
   <div class="container py-4 chat-container">
-    <a href="#" class="back-link small" @click.prevent="goBack">&larr; Back to My sessions</a>
+    <a href="#" class="back-link small" @click.prevent="goBack">&larr; Back to My classes</a>
 
     <div class="p-4 mt-2 mb-3 banner">
       <h1 class="h4 mb-1">{{ heading }}</h1>

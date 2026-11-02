@@ -313,6 +313,48 @@ router.post('/:id/slots/:slotId/book', verifyToken, async (req, res) => {
   }
 })
 
+// The teacher adds one more start time to a course (the "Add new timeslot" popup on My classes).
+// body = { date: '2026-11-08', time: '14:00' }
+router.post('/:id/slots', verifyToken, async (req, res) => {
+  const slot = { date: req.body.date, time: req.body.time }
+  if (!isRealSlot(slot)) {
+    return res.status(400).json({ error: 'Please pick a valid date and time.' })
+  }
+  if (slotMoment(slot.date, slot.time) <= new Date()) {
+    return res.status(400).json({ error: 'The start time must be in the future.' })
+  }
+
+  const ref = db.collection('offers').doc(req.params.id)
+  // in a transaction, so a booking made at the same moment is never wiped out
+  const outcome = await db.runTransaction(async (t) => {
+    const snapshot = await t.get(ref)
+    if (!snapshot.exists) return { status: 404, error: 'Course not found.' }
+    const offer = snapshot.data()
+    if (offer.teacherUid !== req.user.uid) return { status: 403, error: 'This is not your course.' }
+
+    const oldSlots = offer.slots || []
+    const id = slot.date + '-' + slot.time
+    for (const old of oldSlots) {
+      if (old.id === id) return { status: 409, error: 'This course already starts at that time.' }
+    }
+    if (oldSlots.length >= maxSlots) {
+      return { status: 409, error: 'You can add up to ' + maxSlots + ' start times.' }
+    }
+
+    const newSlot = { id: id, date: slot.date, time: slot.time, capacity: offer.maxCapacity || 1, bookedBy: [] }
+    const slots = [...oldSlots, newSlot]
+    slots.sort((a, b) => (a.id < b.id ? -1 : 1)) // soonest first
+    const updatedAt = new Date().toISOString()
+    t.update(ref, { slots: slots, updatedAt: updatedAt })
+    return { offer: { id: snapshot.id, ...offer, slots: slots, updatedAt: updatedAt } }
+  })
+
+  if (outcome.error) {
+    return res.status(outcome.status).json({ error: outcome.error })
+  }
+  res.status(201).json(publicOffer(outcome.offer, req.user.uid))
+})
+
 router.put('/:id', verifyToken, async (req, res) => {
   const ref = db.collection('offers').doc(req.params.id)
   const snapshot = await ref.get()

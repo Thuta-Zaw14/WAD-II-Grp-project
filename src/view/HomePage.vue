@@ -56,7 +56,7 @@ function handleAuthChange(firebaseUser) {
 const stopListening = onAuthStateChanged(auth, handleAuthChange)
 
 function goToSessions() {
-  router.push('/sessions')
+  router.push('/classes')
 }
 
 // the public questions & discussion of a course (anyone can read and write there)
@@ -472,15 +472,15 @@ function resetFilters() {
           <div v-if="bookedMessage">
             <div class="alert alert-success">{{ bookedMessage }}</div>
             <p class="small text-muted">
-              You will find it under My sessions, where you can cancel it while that is still allowed.
+              You will find it under My classes, where you can cancel it while that is still allowed.
             </p>
-            <button class="btn btn-brand me-2" @click="goToSessions">Go to My sessions</button>
+            <button class="btn btn-brand me-2" @click="goToSessions">Go to My classes</button>
             <button class="btn btn-outline-secondary" @click="closeBooking">Close</button>
           </div>
 
           <template v-else>
             <p v-if="hasBooked(selectedSkill)" class="alert alert-info small">
-              You have already booked this course. See My sessions.
+              You have already booked this course. See My classes.
             </p>
             <p v-else class="text-muted">Pick a time, then confirm your booking.</p>
 
