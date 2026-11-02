@@ -66,7 +66,8 @@ function findProblem(body) {
     }
   }
 
-  // the photo is a small square picture made by the browser (see EditProfileModal.vue)
+  // Picture uploads are switched off: a photo added before can be kept or removed, nothing more
+  // (the route below checks it matches the saved one)
   if (body.photo !== undefined) {
     if (typeof body.photo !== 'string') {
       return 'Your photo must be a picture.'
@@ -202,6 +203,9 @@ router.patch('/me', verifyToken, async (req, res) => {
   const snapshot = await userRef.get()
   if (!snapshot.exists) {
     return res.status(404).json({ error: 'Profile not found' })
+  }
+  if (changes.photo && changes.photo !== snapshot.data().photo) {
+    return res.status(400).json({ error: 'Profile pictures can no longer be added.' })
   }
 
   await userRef.update(changes)

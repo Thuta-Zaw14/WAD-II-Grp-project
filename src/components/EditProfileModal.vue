@@ -112,9 +112,8 @@ function undoChanges() {
 }
 
 // ---------- Photo ----------
-const photoInput = ref(null)
-const photoError = ref('')
-
+// New photos can't be added any more (the site does not take picture uploads). Someone who
+// added one before can still remove it, and until then it is shown.
 const initials = computed(() => {
   const words = draft.name.trim().split(' ').filter((w) => w !== '')
   if (words.length === 0) return '?'
@@ -122,36 +121,6 @@ const initials = computed(() => {
   if (words.length > 1) letters += words[words.length - 1][0]
   return letters.toUpperCase()
 })
-
-// Shrink the picture to a 160px square, so it is small enough to keep in the profile
-function pickPhoto(event) {
-  const file = event.target.files[0]
-  event.target.value = '' // so picking the same file again still works
-  photoError.value = ''
-  if (!file) return
-  if (!file.type.startsWith('image/')) {
-    photoError.value = 'Please choose a picture.'
-    return
-  }
-
-  const img = new Image()
-  img.onload = () => {
-    const size = 160
-    const side = Math.min(img.width, img.height)
-    const canvas = document.createElement('canvas')
-    canvas.width = size
-    canvas.height = size
-    const left = (img.width - side) / 2
-    const top = (img.height - side) / 2
-    canvas.getContext('2d').drawImage(img, left, top, side, side, 0, 0, size, size)
-    draft.photo = canvas.toDataURL('image/jpeg', 0.85)
-    URL.revokeObjectURL(img.src)
-  }
-  img.onerror = () => {
-    photoError.value = 'That picture could not be opened.'
-  }
-  img.src = URL.createObjectURL(file)
-}
 
 // ---------- Skills (edited on their own pages) ----------
 function skillsOf(field) {
@@ -349,21 +318,14 @@ onUnmounted(() => {
             <div class="d-flex align-items-center gap-3 mb-3">
               <img v-if="draft.photo" :src="draft.photo" alt="Your profile photo" class="photo" />
               <div v-else class="photo photo-empty" aria-hidden="true">{{ initials }}</div>
-              <div>
-                <button type="button" class="btn btn-sm btn-outline-secondary me-2" @click="photoInput.click()">
-                  {{ draft.photo ? 'Change photo' : 'Upload photo' }}
-                </button>
-                <button
-                  v-if="draft.photo"
-                  type="button"
-                  class="btn btn-sm btn-link text-danger p-0"
-                  @click="draft.photo = ''"
-                >
-                  Remove
-                </button>
-                <input ref="photoInput" type="file" accept="image/*" class="d-none" @change="pickPhoto" />
-                <small v-if="photoError" class="d-block text-danger mt-1">{{ photoError }}</small>
-              </div>
+              <button
+                v-if="draft.photo"
+                type="button"
+                class="btn btn-sm btn-link text-danger p-0"
+                @click="draft.photo = ''"
+              >
+                Remove photo
+              </button>
             </div>
 
             <div class="mb-3">
