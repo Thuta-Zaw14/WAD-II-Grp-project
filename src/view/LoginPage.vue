@@ -139,7 +139,15 @@ async function submit() {
     }
   } catch (error) {
     isError.value = true
-    message.value = 'Failed: ' + error.code
+    // Firebase allows one account per email, so signing up with a taken one (an admin's too) fails here.
+    // Its only password rule (no custom policy is set for the project) is a minimum of 6 characters.
+    if (error.code === 'auth/email-already-in-use') {
+      message.value = 'This email is already registered. Please try a different email.'
+    } else if (error.code === 'auth/weak-password') {
+      message.value = 'Your password must be at least 6 characters long.'
+    } else {
+      message.value = 'Failed: ' + error.code
+    }
   }
 }
 

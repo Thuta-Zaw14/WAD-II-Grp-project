@@ -140,7 +140,7 @@ function loginErrorText(err) {
     'auth/invalid-credential': 'Your current password is incorrect.',
     'auth/missing-password': 'Please enter your current password.',
     'auth/too-many-requests': 'Too many tries. Please wait a moment and try again.',
-    'auth/weak-password': 'That password is too weak.',
+    'auth/weak-password': 'Your new password must be at least 6 characters long.',
     'auth/requires-recent-login': 'Please log out and log in again, then try again.',
   }
   return messages[err.code] || 'Something went wrong: ' + (err.code || err.message)
@@ -192,7 +192,7 @@ const strength = computed(() => {
 })
 
 const pwProblem = computed(() => {
-  if (pwForm.next !== '' && pwForm.next.length < 8) return 'Use at least 8 characters.'
+  if (pwForm.next !== '' && pwForm.next.length < 6) return 'Your new password must be at least 6 characters long.'
   if (pwForm.repeat !== '' && pwForm.next !== pwForm.repeat) return 'The new passwords do not match.'
   if (pwForm.needsCurrent && pwForm.next !== '' && pwForm.next === pwForm.current) {
     return 'Pick a password different from your current one.'
