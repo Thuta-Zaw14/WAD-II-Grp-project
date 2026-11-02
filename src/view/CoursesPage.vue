@@ -304,6 +304,31 @@ const slotsByDate = computed(() => {
   return groups
 })
 
+// ---------- Details popup ----------
+const detailsId = ref(null) // id of the course in the details popup (null = popup closed)
+
+const detailsSkill = computed(() => {
+  for (const s of skills.value) {
+    if (s.id === detailsId.value) return s
+  }
+  return null
+})
+
+function openDetails(skill) {
+  detailsId.value = skill.id
+}
+
+function closeDetails() {
+  detailsId.value = null
+}
+
+// from the details popup straight into booking
+function bookFromDetails() {
+  const skill = detailsSkill.value
+  closeDetails()
+  openBooking(skill)
+}
+
 function resetFilters() {
   selectedCategory.value = 'All'
   selectedRegion.value = 'All'
@@ -419,6 +444,7 @@ function resetFilters() {
                 <span class="credit-pill">{{ s.creditCost }} credit{{ s.creditCost === 1 ? '' : 's' }} to join</span>
               </p>
 
+              <button class="btn btn-outline-secondary w-100 mb-2" @click="openDetails(s)">Details</button>
               <button v-if="isMine(s)" class="btn btn-outline-secondary w-100" disabled>Your course</button>
               <button v-else class="btn btn-brand w-100" @click="openBooking(s)">
                 {{ hasBooked(s) ? 'View booking' : 'Book a session' }}
@@ -447,6 +473,54 @@ function resetFilters() {
           >
             <button class="btn btn-outline-secondary btn-sm" @click="resetFilters">Clear search and filters</button>
           </EmptyState>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Details popup -->
+  <div
+    v-if="detailsSkill"
+    class="modal d-block"
+    style="background: rgba(0, 0, 0, 0.5)"
+    @click.self="closeDetails"
+  >
+    <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable">
+      <div class="modal-content">
+        <div class="modal-header modal-banner">
+          <div>
+            <h2 class="h5 mb-1">{{ detailsSkill.title }}</h2>
+            <span class="badge rounded-pill text-bg-light">
+              <span class="dot" :style="{ background: categoryColors[detailsSkill.category] }"></span>{{ detailsSkill.skill }}
+            </span>
+          </div>
+          <button class="btn-close" @click="closeDetails"></button>
+        </div>
+
+        <div class="modal-body">
+          <p v-if="detailsSkill.description" class="details-description">{{ detailsSkill.description }}</p>
+
+          <div class="fw-bold mb-2">Stages</div>
+          <!-- hover (or tab to) a stage to read its description -->
+          <div v-if="detailsSkill.stages && detailsSkill.stages.length > 0" class="d-flex flex-column gap-2">
+            <div
+              v-for="(stage, i) in detailsSkill.stages"
+              :key="i"
+              class="stage-box"
+              :class="{ 'has-desc': stage.description }"
+              :tabindex="stage.description ? 0 : -1"
+            >
+              <span class="stage-num">{{ i + 1 }}</span>{{ stage.name }}
+              <p v-if="stage.description" class="stage-desc small mb-0">{{ stage.description }}</p>
+            </div>
+          </div>
+          <p v-else class="text-muted small mb-0">This course has no stages listed.</p>
+        </div>
+
+        <div v-if="!isMine(detailsSkill)" class="modal-footer">
+          <button class="btn btn-brand" @click="bookFromDetails">
+            {{ hasBooked(detailsSkill) ? 'View booking' : 'Book a session' }}
+          </button>
         </div>
       </div>
     </div>
@@ -643,5 +717,52 @@ function resetFilters() {
 .modal-banner {
   background: var(--k-surface-alt);
   color: var(--k-text);
+}
+
+.details-description {
+  white-space: pre-line; /* keep the teacher's line breaks */
+}
+
+/* one small box per course stage */
+.stage-box {
+  padding: 6px 12px;
+  border: 1px solid var(--k-border);
+  border-radius: var(--k-radius);
+  background: var(--k-surface-alt);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.stage-num {
+  color: var(--k-accent);
+  margin-right: 6px;
+}
+
+/* the description is hidden until the box is hovered (or focused with the keyboard) */
+.stage-desc {
+  max-height: 0;
+  overflow: hidden;
+  opacity: 0;
+  font-weight: 400;
+  color: var(--k-text);
+  transition: max-height 0.2s ease, opacity 0.2s ease, margin-top 0.2s ease;
+}
+
+.stage-box.has-desc {
+  cursor: default;
+}
+
+/* each stage has its own row, so hovering only opens the description underneath */
+.stage-box.has-desc:hover,
+.stage-box.has-desc:focus {
+  border-color: var(--k-brand);
+  outline: none;
+}
+
+.stage-box.has-desc:hover .stage-desc,
+.stage-box.has-desc:focus .stage-desc {
+  max-height: 200px;
+  opacity: 1;
+  margin-top: 6px;
 }
 </style>
