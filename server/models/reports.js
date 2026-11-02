@@ -67,7 +67,7 @@ export async function searchTargets(uid, type, typed) {
   } else if (type === 'course') {
     const now = new Date()
     for (const offer of await getAllDocs('offers')) {
-      if (!isOngoing(offer, now)) continue
+      if (offer.teacherUid === uid || !isOngoing(offer, now)) continue // not my own courses
       const title = offer.title || offer.skill || ''
       if (contains(title, typed) || contains(offer.teacherName, typed)) {
         results.push({ id: offer.id, name: title, detail: 'Taught by ' + (offer.teacherName || 'unknown') })
@@ -91,6 +91,7 @@ export async function findTarget(uid, type, targetId) {
   }
   const snap = await db.collection('offers').doc(targetId).get()
   if (!snap.exists) return fail(400, 'Please pick a course from the search results.')
+  if (snap.data().teacherUid === uid) return fail(400, "You can't report your own course.")
   if (!isOngoing(snap.data(), new Date())) return fail(400, 'That course is no longer running.')
   return { name: snap.data().title || snap.data().skill || '' }
 }
