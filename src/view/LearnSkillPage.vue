@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, reactive } from 'vue'
 import { useRouter } from 'vue-router'
 import { auth } from '@/firebase'
 import { useProfileStore } from '@/stores/profile'
@@ -30,6 +30,10 @@ const loading = ref(true)
 const blocked = ref(false)
 const saving = ref(false)
 const error = ref('')
+const summaryError = ref('')
+const fieldErrors = reactive({ skill: '', title: '' })
+const touched = reactive({ skill: false, title: false })
+const submitAttempted = ref(false)
 
 const skillGenre = computed(() => {
   for (const s of store.profile.skillsLearn || []) {
@@ -41,6 +45,37 @@ const skillGenre = computed(() => {
 const profileReady = computed(() => {
   return store.profile && (store.profile.skillsLearn || []).length > 0
 })
+
+function validateSkill() {
+  return skill.value ? '' : 'Pick one of the skills you want to learn.'
+}
+
+function validateTitle() {
+  if (!title.value.trim()) return 'Please enter a title.'
+  return findTitleProblem(title.value)
+}
+
+function validateForm() {
+  submitAttempted.value = true
+  touched.skill = true
+  touched.title = true
+  fieldErrors.skill = validateSkill()
+  fieldErrors.title = validateTitle()
+  const invalidFields = []
+  if (fieldErrors.skill) invalidFields.push('Skill')
+  if (fieldErrors.title) invalidFields.push('Title')
+  summaryError.value = invalidFields.length
+    ? `Please correct these fields: ${invalidFields.join(' and ')}.`
+    : ''
+  return invalidFields.length === 0
+}
+
+function handleFieldChange(field) {
+  touched[field] = true
+  fieldErrors[field] = field === 'skill' ? validateSkill() : validateTitle()
+  if (submitAttempted.value) validateForm()
+  else summaryError.value = ''
+}
 
 onMounted(async () => {
   await auth.authStateReady()
@@ -80,19 +115,7 @@ onMounted(async () => {
 
 async function save() {
   error.value = ''
-  if (skill.value === '') {
-    error.value = 'Pick one of the skills you want to learn.'
-    return
-  }
-  if (!title.value.trim()) {
-    error.value = 'Please enter a title.'
-    return
-  }
-  const titleProblem = findTitleProblem(title.value)
-  if (titleProblem !== '') {
-    error.value = titleProblem
-    return
-  }
+  if (!validateForm()) return
 
   saving.value = true
   const uploaded = []
@@ -156,17 +179,30 @@ async function remove() {
       <a href="#" @click.prevent="router.push('/profile')">Go to my profile</a>
     </div>
 
-    <form v-else @submit.prevent="save">
+    <form v-else novalidate @submit.prevent="save">
       <div v-if="error" class="alert alert-danger" role="alert">
         <strong>Could not save:</strong> {{ error }}
       </div>
 
       <div class="mb-3">
-        <label class="form-label" for="learn-skill">Skill <span class="text-danger">*</span></label>
-        <select id="learn-skill" v-model="skill" class="form-select" required>
+        <label class="form-label" for="learn-skill">Skill <span class="required-marker" aria-hidden="true">*</span></label>
+        <select
+          id="learn-skill"
+          v-model="skill"
+          class="form-select"
+          :class="{ 'is-invalid': fieldErrors.skill }"
+          :aria-invalid="!!fieldErrors.skill"
+          :aria-describedby="fieldErrors.skill ? 'learn-skill-error' : undefined"
+          required
+          @change="handleFieldChange('skill')"
+          @blur="handleFieldChange('skill')"
+        >
           <option disabled value="">Pick one of your skills</option>
           <option v-for="s in store.profile.skillsLearn" :key="s.name" :value="s.name">{{ s.name }}</option>
         </select>
+        <div v-if="fieldErrors.skill" id="learn-skill-error" class="invalid-feedback d-block">
+          {{ fieldErrors.skill }}
+        </div>
         <small v-if="skillGenre" class="text-muted">Genre: {{ skillGenre }}</small>
       </div>
 
@@ -174,7 +210,14 @@ async function remove() {
         v-model:title="title"
         v-model:description="description"
         v-model:media="media"
+        :title-error="fieldErrors.title"
+        @title-input="handleFieldChange('title')"
+        @title-blur="handleFieldChange('title')"
       />
+
+      <div v-if="summaryError" class="alert alert-danger" role="alert" aria-live="assertive">
+        {{ summaryError }}
+      </div>
 
       <div class="d-flex gap-2">
         <button class="btn btn-brand" :disabled="saving">
@@ -190,3 +233,10 @@ async function remove() {
     </form>
   </main>
 </template>
+
+<style scoped>
+.required-marker {
+  color: #dc3545;
+  font-weight: 700;
+}
+</style>

@@ -66,13 +66,13 @@ function findProblem(body, uid, user, existing) {
   }
 
   if (body.mode !== 'physical' && body.mode !== 'online') return 'Choose a physical or an online class.'
+  if (!['standard', 'high_risk'].includes(body.difficulty)) return 'Choose a difficulty.'
 
   if (body.mode === 'physical') {
     if (!regionList.includes(body.region)) return 'Please pick a region.'
     if (typeof body.place !== 'string' || body.place.trim() === '') return 'Please enter a public meeting place.'
     if (body.place.trim().length > 100) return 'The meeting place must be 100 characters or fewer.'
     if (!['provided', 'bring', 'not_required'].includes(body.equipmentOption)) return 'Choose an equipment option.'
-    if (!['standard', 'high_risk'].includes(body.difficulty)) return 'Choose a difficulty.'
   }
 
   if (!Number.isInteger(body.maxCapacity) || body.maxCapacity < 1 || body.maxCapacity > 50) {
@@ -83,6 +83,9 @@ function findProblem(body, uid, user, existing) {
   }
   if (!Number.isInteger(body.lessonsPerWeek) || body.lessonsPerWeek < 1 || body.lessonsPerWeek > 7) {
     return 'Lessons per week must be a whole number (1-7).'
+  }
+  if (!Number.isInteger(body.sessionDurationMinutes) || body.sessionDurationMinutes < 1 || body.sessionDurationMinutes > 1440) {
+    return 'Session duration must be a whole number from 1 to 1440 minutes.'
   }
 
   if (!Array.isArray(body.stages) || body.stages.length < 1) return 'A course needs at least 1 stage.'
@@ -163,7 +166,7 @@ function buildOffer(body, uid, user, existing) {
   const skill = findProfileSkill(user, 'skillsTeach', body.skill)
   const physical = body.mode === 'physical'
   const equipmentOption = physical ? body.equipmentOption : 'not_required'
-  const difficulty = physical ? body.difficulty : 'standard'
+  const difficulty = body.difficulty
 
   // the pin on the home page map: the region's middle, shifted a little.
   // Keep the old pin when the region has not changed.
@@ -210,6 +213,7 @@ function buildOffer(body, uid, user, existing) {
     maxCapacity: body.maxCapacity,
     durationWeeks: body.durationWeeks,
     lessonsPerWeek: body.lessonsPerWeek,
+    sessionDurationMinutes: body.sessionDurationMinutes,
     stages: stages,
     slots: buildSlots(body.slots, body.maxCapacity, existing),
     creditCost: creditCost, // paid by the student when booking; goes to the teacher when the course is finished

@@ -183,6 +183,7 @@ async function doReport(b) {
                 {{ b.role === 'learner' ? 'Taught by ' + b.teacherName : 'Student: ' + b.learnerName }}
               </p>
               <p class="small mb-1">Starts {{ formatTime(b.startsAt) }}</p>
+              <p class="small mb-1">{{ b.sessionDurationMinutes || 60 }} minutes per session</p>
               <p v-if="b.mode === 'online'" class="small text-muted mb-1">Online class</p>
               <p v-else class="small text-muted mb-1">Meets at {{ b.place }} ({{ b.region }})</p>
               <p class="small mb-2">{{ creditNote(b) }}</p>

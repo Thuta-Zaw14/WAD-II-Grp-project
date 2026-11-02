@@ -7,7 +7,6 @@ import SkillCard from '../components/SkillCard.vue'
 import NavBar from '../components/NavBar.vue'
 import LoadingText from '../components/LoadingText.vue'
 import { useToastStore } from '../stores/toast'
-import { findSkillNameProblem, squeezeSpaces } from '../services/skillRules'
 
 const router = useRouter()
 const store = useProfileStore()
@@ -37,6 +36,10 @@ function skillsOf(field) {
   return store.profile[field] || []
 }
 
+function countLabel(count, item) {
+  return `${count} ${item}${count === 1 ? '' : 's'}`
+}
+
 const initials = computed(() => {
   const name = store.profile && store.profile.name ? store.profile.name.trim() : ''
   if (name === '') return '?'
@@ -49,91 +52,27 @@ const initials = computed(() => {
 })
 
 // ---------- Editing ----------
-const maxSkills = 15 // per list (the server checks too)
 const isEditing = ref(false)
 const formError = ref('')
 
 // the form works on a copy, so Cancel leaves the real profile untouched
-const draft = reactive({ name: '', bio: '', region: '', skillsTeach: [], skillsLearn: [] })
-
-// what is typed in the "add a skill" row of each list
-const newName = reactive({ skillsTeach: '', skillsLearn: '' })
-const newCategory = reactive({ skillsTeach: '', skillsLearn: '' })
+const draft = reactive({ name: '', bio: '', region: '' })
 
 const skillFields = [
-  { field: 'skillsTeach', eyebrow: 'SHARE YOUR KNOWLEDGE', label: 'Skills I can teach' },
-  { field: 'skillsLearn', eyebrow: 'KEEP GROWING', label: 'Skills I want to learn' },
+  { field: 'skillsTeach', eyebrow: 'SHARE YOUR KNOWLEDGE', label: 'Skills I Can Teach' },
+  { field: 'skillsLearn', eyebrow: 'KEEP GROWING', label: 'Skills I Want to Learn' },
 ]
 
 function openEditor() {
   draft.name = store.profile.name || ''
   draft.bio = store.profile.bio || ''
   draft.region = store.profile.region || ''
-  // copy each skill object too, so removing or adding in the form never touches the real profile
-  draft.skillsTeach = skillsOf('skillsTeach').map((skill) => ({ ...skill }))
-  draft.skillsLearn = skillsOf('skillsLearn').map((skill) => ({ ...skill }))
-  for (const item of skillFields) {
-    newName[item.field] = ''
-    newCategory[item.field] = ''
-  }
   formError.value = ''
   isEditing.value = true
 }
 
 function closeEditor() {
   isEditing.value = false
-}
-
-// Add the typed skill to one of the two lists
-function addSkill(field) {
-  formError.value = ''
-
-  // squeeze extra spaces: "Photo   editing " -> "Photo editing"
-  const name = squeezeSpaces(newName[field])
-  if (name === '') {
-    formError.value = 'Type a skill first.'
-    return
-  }
-  if (name.length > 40) {
-    formError.value = 'A skill name must be 40 characters or fewer.'
-    return
-  }
-  const nameProblem = findSkillNameProblem(name)
-  if (nameProblem !== '') {
-    formError.value = nameProblem
-    return
-  }
-  if (newCategory[field] === '') {
-    formError.value = 'Pick a genre for "' + name + '".'
-    return
-  }
-  if (draft[field].length >= maxSkills) {
-    formError.value = 'You can add up to ' + maxSkills + ' skills in each list.'
-    return
-  }
-  for (const skill of draft[field]) {
-    if (skill.name.toLowerCase() === name.toLowerCase()) {
-      formError.value = '"' + name + '" is already in this list.'
-      return
-    }
-  }
-
-  draft[field].push({ name: name, category: newCategory[field] })
-  newName[field] = '' // keep the genre selected, people often add several of one genre
-}
-
-// When what is typed matches a suggested skill exactly, fill in its genre too
-function pickKnownGenre(field) {
-  const typed = newName[field].trim().toLowerCase()
-  for (const known of store.knownSkills) {
-    if (known.name.toLowerCase() === typed) {
-      newCategory[field] = known.category
-    }
-  }
-}
-
-function removeSkill(field, index) {
-  draft[field].splice(index, 1)
 }
 
 async function save() {
@@ -153,19 +92,10 @@ async function save() {
     formError.value = 'Your bio must be 300 characters or fewer.'
     return
   }
-  for (const item of skillFields) {
-    if (newName[item.field].trim() !== '') {
-      formError.value = 'You typed "' + newName[item.field].trim() + '" but did not press Add.'
-      return
-    }
-  }
-
   const saved = await store.saveProfile({
     name: name,
     bio: draft.bio.trim(),
     region: draft.region,
-    skillsTeach: draft.skillsTeach,
-    skillsLearn: draft.skillsLearn,
   })
 
   if (saved) {
@@ -217,11 +147,9 @@ async function save() {
               <span class="small text-muted ms-3">{{ store.profile.email }}</span>
             </div>
 
-            <!-- disabled until the genre list has arrived, because the form needs it -->
             <button
               type="button"
               class="btn btn-kongsi"
-              :disabled="store.categories.length === 0"
               @click="openEditor"
             >
               Edit profile
@@ -246,21 +174,39 @@ async function save() {
         <div class="row g-4 mb-4">
           <div v-for="item in skillFields" :key="item.field" class="col-12 col-lg-6">
             <section class="k-card p-4 h-100">
-              <p class="eyebrow mb-1">{{ item.eyebrow }}</p>
-              <h2 class="h5">{{ item.label }}</h2>
-              <div class="d-flex flex-wrap gap-2 mt-3">
-                <span
-                  v-for="skill in skillsOf(item.field)"
-                  :key="skill.name"
-                  class="chip"
-                  :class="'cat-' + skill.category"
+              <div class="d-flex justify-content-between align-items-start gap-2 mb-3">
+                <div>
+                  <p class="eyebrow mb-1">{{ item.eyebrow }}</p>
+                  <h2 class="h5 mb-1">{{ item.label }}</h2>
+                  <small class="text-muted">{{ countLabel(skillsOf(item.field).length, 'skill') }}</small>
+                </div>
+                <button
+                  type="button"
+                  class="btn btn-sm btn-kongsi"
+                  @click="router.push(item.field === 'skillsTeach' ? '/skills/teach' : '/skills/learn')"
                 >
-                  {{ skill.name }}
-                </span>
-                <p v-if="skillsOf(item.field).length === 0" class="text-muted small mb-0">
-                  No skills yet. Use "Edit profile" to add some.
-                </p>
+                  + Add Skills
+                </button>
               </div>
+              <div v-if="skillsOf(item.field).length > 0">
+                <div v-for="skill in skillsOf(item.field)" :key="skill.name" class="course-row">
+                  <div>
+                    <strong>{{ skill.name }}</strong>
+                    <small class="text-muted d-block">{{ skill.category }}</small>
+                  </div>
+                  <button
+                    type="button"
+                    class="btn btn-sm btn-outline-secondary"
+                    @click="router.push({
+                      path: item.field === 'skillsTeach' ? '/skills/teach' : '/skills/learn',
+                      query: { edit: skill.name },
+                    })"
+                  >
+                    Edit
+                  </button>
+                </div>
+              </div>
+              <p v-else class="text-muted small mb-0">No skills yet.</p>
             </section>
           </div>
         </div>
@@ -272,7 +218,8 @@ async function save() {
               <div class="d-flex justify-content-between align-items-start gap-2 mb-3">
                 <div>
                   <p class="eyebrow mb-1">YOUR COURSES</p>
-                  <h2 class="h5 mb-0">Courses I teach</h2>
+                  <h2 class="h5 mb-1">Courses I Teach</h2>
+                  <small class="text-muted">{{ countLabel(store.myOffers.length, 'course') }}</small>
                 </div>
                 <button type="button" class="btn btn-sm btn-kongsi" @click="router.push('/teach/new')">
                   + Add a course
@@ -280,7 +227,7 @@ async function save() {
               </div>
 
               <p v-if="store.myOffers.length === 0" class="text-muted small mb-0">
-                No courses yet. Add a skill under "Skills I can teach", then offer a course.
+                No courses yet. Add a skill under "Skills I Can Teach", then offer a course.
               </p>
               <div v-for="offer in store.myOffers" :key="offer.id" class="course-row">
                 <div>
@@ -303,7 +250,8 @@ async function save() {
               <div class="d-flex justify-content-between align-items-start gap-2 mb-3">
                 <div>
                   <p class="eyebrow mb-1">YOUR GOALS</p>
-                  <h2 class="h5 mb-0">What I want to learn</h2>
+                  <h2 class="h5 mb-1">What I Want to Learn</h2>
+                  <small class="text-muted">{{ countLabel(store.myGoals.length, 'goal') }}</small>
                 </div>
                 <button type="button" class="btn btn-sm btn-kongsi" @click="router.push('/learn/new')">
                   + Add a goal
@@ -311,7 +259,7 @@ async function save() {
               </div>
 
               <p v-if="store.myGoals.length === 0" class="text-muted small mb-0">
-                No learning goals yet. Add a skill under "Skills I want to learn", then describe your goal.
+                No learning goals yet. Add a skill under "Skills I Want to Learn", then describe your goal.
               </p>
               <div v-for="goal in store.myGoals" :key="goal.id" class="course-row">
                 <div>
@@ -329,7 +277,7 @@ async function save() {
         <!-- Skill cards (earned after finishing sessions) -->
         <section>
           <p class="eyebrow mb-1">YOUR LEARNING JOURNEY</p>
-          <h2 class="h4 mb-3">My skill cards</h2>
+          <h2 class="h4 mb-3">My Skill Cards</h2>
 
           <div v-if="store.skillCards.length > 0" class="row g-4">
             <div v-for="card in store.skillCards" :key="card.id" class="col-12 col-md-6 col-xl-4">
@@ -386,56 +334,6 @@ async function save() {
             <small class="text-muted">Only your region is shown, never your address.</small>
           </div>
 
-          <fieldset v-for="item in skillFields" :key="item.field" class="mb-3">
-            <legend class="form-label fs-6">{{ item.label }}</legend>
-
-            <!-- the skills added so far; the x removes one -->
-            <div class="d-flex flex-wrap gap-2 mb-2">
-              <span
-                v-for="(skill, index) in draft[item.field]"
-                :key="skill.name"
-                class="chip"
-                :class="'cat-' + skill.category"
-              >
-                {{ skill.name }}
-                <button
-                  type="button"
-                  class="chip-remove"
-                  :aria-label="'Remove ' + skill.name"
-                  @click="removeSkill(item.field, index)"
-                >
-                  &times;
-                </button>
-              </span>
-              <small v-if="draft[item.field].length === 0" class="text-muted">None yet</small>
-            </div>
-
-            <!-- type a skill, pick its genre, press Add (or the Enter key) -->
-            <div class="d-flex flex-wrap gap-2">
-              <input
-                v-model="newName[item.field]"
-                type="text"
-                class="form-control skill-input"
-                maxlength="40"
-                placeholder="Type a skill, e.g. Badminton"
-                :list="'suggestions-' + item.field"
-                autocomplete="off"
-                :aria-label="'Add to: ' + item.label"
-                @input="pickKnownGenre(item.field)"
-                @keydown.enter.prevent="addSkill(item.field)"
-              />
-              <!-- the suggestions the browser shows while typing -->
-              <datalist :id="'suggestions-' + item.field">
-                <option v-for="known in store.knownSkills" :key="known.name" :value="known.name"></option>
-              </datalist>
-              <select v-model="newCategory[item.field]" class="form-select genre-select" aria-label="Genre">
-                <option disabled value="">Genre</option>
-                <option v-for="c in store.categories" :key="c" :value="c">{{ c }}</option>
-              </select>
-              <button type="button" class="btn btn-outline-secondary" @click="addSkill(item.field)">Add</button>
-            </div>
-          </fieldset>
-
           <p v-if="formError" class="text-danger small fw-semibold" role="alert">{{ formError }}</p>
 
           <div class="d-flex justify-content-end gap-2 mt-4">
@@ -487,21 +385,6 @@ async function save() {
   opacity: 0.75;
 }
 
-.chip {
-  padding: 6px 12px;
-  border-radius: 9px;
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--chip-color, var(--k-accent));
-  background: color-mix(in srgb, var(--chip-color, var(--k-accent)) 12%, white);
-  border: 1px solid color-mix(in srgb, var(--chip-color, var(--k-accent)) 30%, white);
-}
-
-.cat-Sports { --chip-color: var(--k-cat-sports); }
-.cat-Creative { --chip-color: var(--k-cat-creative); }
-.cat-Music { --chip-color: var(--k-cat-music); }
-.cat-Tech { --chip-color: var(--k-cat-tech); }
-
 .course-row {
   display: flex;
   justify-content: space-between;
@@ -509,34 +392,6 @@ async function save() {
   gap: 12px;
   padding: 10px 0;
   border-top: 1px solid var(--k-border);
-}
-
-.chip-remove {
-  margin-left: 6px;
-  padding: 0;
-  border: 0;
-  background: none;
-  color: inherit;
-  font-size: 15px;
-  line-height: 1;
-  cursor: pointer;
-}
-
-.skill-input {
-  flex: 1 1 10rem;
-  min-width: 0;
-}
-
-/* on a phone the typing box gets a whole row; genre and Add sit under it */
-@media (max-width: 575.98px) {
-  .skill-input {
-    flex-basis: 100%;
-  }
-}
-
-.genre-select {
-  flex: 0 0 8.5rem;
-  width: 8.5rem;
 }
 
 .modal-overlay {

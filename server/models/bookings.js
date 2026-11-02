@@ -125,6 +125,9 @@ export async function bookSlot(uid, offerId, slotId) {
       stageNames: stageNames,
       slotDate: slot.date,
       slotTime: slot.time,
+      sessionDurationMinutes: Number.isInteger(offer.sessionDurationMinutes)
+        ? offer.sessionDurationMinutes
+        : 60,
       startsAt: startsAt.toISOString(),
       finishAfter: finishTime(startsAt, weeks).toISOString(), // when both people can confirm it is finished
       creditCost: cost, // the price at the time of booking, even if the teacher changes it later

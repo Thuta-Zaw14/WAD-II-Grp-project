@@ -6,6 +6,7 @@ import ChatPage from '../view/ChatPage.vue'
 import DiscussionPage from '../view/DiscussionPage.vue'
 import InsightsPage from '@/view/Insightspage.vue'
 import ProfilePage from '../view/ProfilePage.vue'
+import SkillListPage from '../view/SkillListPage.vue'
 import TeachSkillPage from '../view/TeachSkillPage.vue'
 import LearnSkillPage from '../view/LearnSkillPage.vue'
 import AdminPage from '../view/AdminPage.vue'
@@ -24,6 +25,8 @@ const router = createRouter({
     { path: '/discussion/:id', component: DiscussionPage, props: true }, // the public discussion of one course
     { path: '/insights', component: InsightsPage },
     { path: '/profile', component: ProfilePage },
+    { path: '/skills/teach', component: SkillListPage, props: { kind: 'teach' } },
+    { path: '/skills/learn', component: SkillListPage, props: { kind: 'learn' } },
     // props: true hands the :id in the address to the page as a prop
     { path: '/teach/new', component: TeachSkillPage },
     { path: '/teach/:id', component: TeachSkillPage, props: true },

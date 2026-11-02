@@ -3,7 +3,7 @@ import { db } from '../config/firebaseAdmin.js'
 import { verifyToken } from '../middleware/verifyToken.js'
 import { addDocID, findDocsWhereEquals } from '../models/dbQuery.js'
 import { categoryList, regionList } from '../config/skills.js'
-   import { findSkillNameProblem, squeezeSpaces } from '../models/skillRules.js'
+import { findSkillNameProblem, squeezeSpaces } from '../models/skillRules.js'
 
 const router = express.Router()
 
@@ -28,6 +28,8 @@ function findSkillProblem(field, list) {
     if (skill.name.trim().length > 40) {
       return 'A skill name must be 40 characters or fewer.'
     }
+    const nameProblem = findSkillNameProblem(skill.name)
+    if (nameProblem !== '') return nameProblem
     if (!categoryList.includes(skill.category)) {
       return 'Please pick a genre from the list for ' + skill.name.trim() + '.'
     }

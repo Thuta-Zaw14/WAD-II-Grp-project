@@ -50,9 +50,6 @@ function hasLetter(text) {
   return false
 }
 
-// Real skills that are a single letter
-const oneLetterSkills = ['c', 'r']
-
 // Checks the name of a skill, e.g. "Tennis". Returns an error message, or '' if fine.
 // These rules only catch obvious junk ("f", "123", "aaaa"). Nothing can prove that
 // a typed name is a real skill, which is why the profile page also suggests real ones.
@@ -60,8 +57,8 @@ export function findSkillNameProblem(name) {
   const clean = squeezeSpaces(name) // extra spaces are tidied when saving, so ignore them here
   const lower = clean.toLowerCase()
 
-  if (clean.length < 2 && !oneLetterSkills.includes(lower)) {
-    return '"' + clean + '" is too short to be a skill name.'
+  if (clean.length < 3) {
+    return 'A skill name must be at least 3 characters.'
   }
 
   // only English letters, numbers, spaces and a few symbols

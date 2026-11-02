@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, reactive } from 'vue'
 import { useRouter } from 'vue-router'
 import { auth } from '@/firebase'
 import { useProfileStore } from '@/stores/profile'
@@ -44,6 +44,7 @@ const difficulty = ref('standard')
 const maxCapacity = ref(5)
 const durationWeeks = ref(4)
 const lessonsPerWeek = ref(1)
+const sessionDurationMinutes = ref(60)
 const stages = ref([newStage()])
 const slots = ref([]) // [{ date, time, taken }]  taken = students already booked (edit only)
 
@@ -58,6 +59,35 @@ const loading = ref(true)
 const blocked = ref(false)
 const saving = ref(false)
 const error = ref('')
+const summaryError = ref('')
+const submitAttempted = ref(false)
+const fieldErrors = reactive({
+  skill: '',
+  title: '',
+  region: '',
+  place: '',
+  maxCapacity: '',
+  durationWeeks: '',
+  lessonsPerWeek: '',
+  sessionDurationMinutes: '',
+  slotDate: '',
+  slotTime: '',
+  slots: '',
+})
+const touched = reactive({
+  skill: false,
+  title: false,
+  region: false,
+  place: false,
+  maxCapacity: false,
+  durationWeeks: false,
+  lessonsPerWeek: false,
+  sessionDurationMinutes: false,
+  slotDate: false,
+  slotTime: false,
+})
+const stageErrors = ref([''])
+const stageTouched = ref([false])
 
 const physical = computed(() => mode.value === 'physical')
 
@@ -73,6 +103,122 @@ const skillGenre = computed(() => {
 const profileReady = computed(() => {
   return store.profile && store.profile.name && (store.profile.skillsTeach || []).length > 0
 })
+
+const fieldLabels = {
+  skill: 'Skill',
+  title: 'Title',
+  region: 'Region',
+  place: 'Public meeting place',
+  maxCapacity: 'Maximum students',
+  durationWeeks: 'Course length',
+  lessonsPerWeek: 'Lessons per week',
+  sessionDurationMinutes: 'Session duration',
+}
+
+function fieldProblem(field) {
+  if (field === 'skill') return skill.value ? '' : 'Pick one of your skills.'
+  if (field === 'title') {
+    if (!title.value.trim()) return 'Please enter a title.'
+    return findTitleProblem(title.value)
+  }
+  if (field === 'region') return physical.value && !region.value ? 'Please pick a region.' : ''
+  if (field === 'place') {
+    if (physical.value && !place.value.trim()) return 'Please enter a public meeting place.'
+    if (physical.value && place.value.trim().length > 100) return 'The meeting place must be 100 characters or fewer.'
+    return ''
+  }
+  if (field === 'maxCapacity') {
+    return Number.isInteger(maxCapacity.value) && maxCapacity.value >= 1 && maxCapacity.value <= 50
+      ? ''
+      : 'Maximum students must be a whole number from 1 to 50.'
+  }
+  if (field === 'durationWeeks') {
+    return Number.isInteger(durationWeeks.value) && durationWeeks.value >= 1 && durationWeeks.value <= 52
+      ? ''
+      : 'Course length must be a whole number of weeks (1-52).'
+  }
+  if (field === 'lessonsPerWeek') {
+    return Number.isInteger(lessonsPerWeek.value) && lessonsPerWeek.value >= 1 && lessonsPerWeek.value <= 7
+      ? ''
+      : 'Lessons per week must be a whole number (1-7).'
+  }
+  if (field === 'sessionDurationMinutes') {
+    return Number.isInteger(sessionDurationMinutes.value) && sessionDurationMinutes.value >= 1 && sessionDurationMinutes.value <= 1440
+      ? ''
+      : 'Session duration must be a whole number from 1 to 1440 minutes.'
+  }
+  return ''
+}
+
+function updateSummary() {
+  if (!submitAttempted.value) return
+  const invalidFields = Object.keys(fieldLabels).filter((field) => fieldErrors[field])
+    .map((field) => fieldLabels[field])
+  if (slots.value.length === 0 || fieldErrors.slotDate || fieldErrors.slotTime) {
+    invalidFields.push('Start date and time')
+  }
+  stageErrors.value.forEach((stageError, index) => {
+    if (stageError) invalidFields.push(`Stage ${index + 1} name`)
+  })
+  summaryError.value = invalidFields.length
+    ? `Please correct these fields: ${invalidFields.join(', ')}.`
+    : ''
+}
+
+function handleFieldChange(field) {
+  touched[field] = true
+  fieldErrors[field] = fieldProblem(field)
+  error.value = ''
+  updateSummary()
+}
+
+function handleModeChange() {
+  if (submitAttempted.value) {
+    validateForm()
+  } else {
+    fieldErrors.region = ''
+    fieldErrors.place = ''
+  }
+}
+
+function handleStageChange(index) {
+  stageTouched.value[index] = true
+  stageErrors.value[index] = stages.value[index].name.trim() ? '' : 'Stage name is required.'
+  updateSummary()
+}
+
+function validateForm() {
+  submitAttempted.value = true
+  for (const field of Object.keys(fieldLabels)) {
+    touched[field] = true
+    fieldErrors[field] = fieldProblem(field)
+  }
+  if (physical.value) {
+    for (const field of ['region', 'place']) {
+      touched[field] = true
+      fieldErrors[field] = fieldProblem(field)
+    }
+  } else {
+    fieldErrors.region = ''
+    fieldErrors.place = ''
+  }
+  if (slots.value.length === 0) {
+    touched.slotDate = true
+    touched.slotTime = true
+    fieldErrors.slotDate = slotDate.value ? '' : 'Pick a start date.'
+    fieldErrors.slotTime = slotTime.value ? '' : 'Pick a start time.'
+  } else {
+    fieldErrors.slotDate = ''
+    fieldErrors.slotTime = ''
+  }
+  fieldErrors.slots = slots.value.length === 0 ? 'Add at least one start date and time.' : ''
+  stageErrors.value = stages.value.map((stage) =>
+    stage.name.trim() ? '' : 'Stage name is required.'
+  )
+  stageTouched.value = stages.value.map(() => true)
+  updateSummary()
+  return !summaryError.value
+}
 
 // Only used for the preview. The server works out the real price when saving.
 const creditCost = computed(() =>
@@ -131,8 +277,11 @@ function fillForm(offer) {
   maxCapacity.value = offer.maxCapacity || 1
   durationWeeks.value = offer.durationWeeks || 4
   lessonsPerWeek.value = offer.lessonsPerWeek || 1
+  sessionDurationMinutes.value = offer.sessionDurationMinutes || 60
   stages.value = (offer.stages || []).map((st) => newStage(st))
   if (stages.value.length === 0) stages.value = [newStage()]
+  stageErrors.value = stages.value.map(() => '')
+  stageTouched.value = stages.value.map(() => false)
   slots.value = (offer.slots || []).map((s) => ({ date: s.date, time: s.time, taken: s.taken || 0 }))
 }
 
@@ -155,7 +304,11 @@ function pickPastSkill(card) {
 
 // ---------- Stages ----------
 function addStage() {
-  if (stages.value.length < MAX_STAGES) stages.value.push(newStage())
+  if (stages.value.length < MAX_STAGES) {
+    stages.value.push(newStage())
+    stageErrors.value.push('')
+    stageTouched.value.push(false)
+  }
 }
 
 function removeStage(index) {
@@ -164,13 +317,20 @@ function removeStage(index) {
     if (m.file) URL.revokeObjectURL(m.url)
   }
   stages.value.splice(index, 1)
+  stageErrors.value.splice(index, 1)
+  stageTouched.value.splice(index, 1)
+  updateSummary()
 }
 
 // ---------- Start times ----------
 function addSlot() {
   error.value = ''
+  touched.slotDate = true
+  touched.slotTime = true
+  fieldErrors.slotDate = slotDate.value ? '' : 'Pick a start date.'
+  fieldErrors.slotTime = slotTime.value ? '' : 'Pick a start time.'
   if (slotDate.value === '' || slotTime.value === '') {
-    error.value = 'Pick a date and a time first.'
+    updateSummary()
     return
   }
   for (const s of slots.value) {
@@ -186,43 +346,23 @@ function addSlot() {
   slots.value.push({ date: slotDate.value, time: slotTime.value, taken: 0 })
   slots.value.sort((a, b) => (a.date + a.time < b.date + b.time ? -1 : 1))
   slotTime.value = ''
+  fieldErrors.slotDate = ''
+  fieldErrors.slotTime = ''
+  fieldErrors.slots = ''
+  updateSummary()
 }
 
 function removeSlot(index) {
   if (slots.value[index].taken > 0) return // students already booked it
   slots.value.splice(index, 1)
+  fieldErrors.slots = slots.value.length === 0 ? 'Add at least one start date and time.' : ''
+  updateSummary()
 }
 
 // ---------- Saving ----------
-// quick checks for instant feedback; the server checks everything again
-function validate() {
-  if (skill.value === '') return 'Pick one of your skills.'
-  if (!title.value.trim()) return 'Please enter a title.'
-  const titleProblem = findTitleProblem(title.value)
-  if (titleProblem !== '') return titleProblem
-  if (physical.value) {
-    if (region.value === '') return 'Please pick a region.'
-    if (!place.value.trim()) return 'Please enter a public meeting place.'
-  }
-  if (!Number.isInteger(maxCapacity.value) || maxCapacity.value < 1 || maxCapacity.value > 50) {
-    return 'Maximum students must be a whole number from 1 to 50.'
-  }
-  if (!Number.isInteger(durationWeeks.value) || durationWeeks.value < 1 || durationWeeks.value > 52) {
-    return 'Course length must be a whole number of weeks (1-52).'
-  }
-  if (!Number.isInteger(lessonsPerWeek.value) || lessonsPerWeek.value < 1 || lessonsPerWeek.value > 7) {
-    return 'Lessons per week must be a whole number (1-7).'
-  }
-  for (const s of stages.value) {
-    if (!s.name.trim()) return 'Every stage needs a name.'
-  }
-  if (slots.value.length === 0) return 'Add at least one start date and time.'
-  return ''
-}
-
 async function save() {
-  error.value = validate()
-  if (error.value) return
+  error.value = ''
+  if (!validateForm()) return
 
   saving.value = true
   const uploaded = [] // files uploaded during this save, removed again if the save fails
@@ -253,10 +393,11 @@ async function save() {
       region: physical.value ? region.value : '',
       place: physical.value ? place.value.trim() : '',
       equipmentOption: physical.value ? equipmentOption.value : 'not_required',
-      difficulty: physical.value ? difficulty.value : 'standard',
+      difficulty: difficulty.value,
       maxCapacity: maxCapacity.value,
       durationWeeks: durationWeeks.value,
       lessonsPerWeek: lessonsPerWeek.value,
+      sessionDurationMinutes: sessionDurationMinutes.value,
       stages: stagesOut,
       slots: slotsOut,
     }
@@ -301,7 +442,7 @@ async function remove() {
 
     <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
       <h1 class="h4 mb-0">
-        {{ isEdit ? 'Edit course' : 'Add a skill I can teach' }}
+      {{ isEdit ? 'Edit course' : 'Add a skill I can teach' }}
       </h1>
       <button
         v-if="!isEdit && !loading && !blocked && profileReady"
@@ -348,14 +489,27 @@ async function remove() {
         <strong>Could not save:</strong> {{ error }}
       </div>
 
-      <form @submit.prevent="save">
+      <form novalidate @submit.prevent="save">
         <!-- The skill comes from the profile, so the genre is already known -->
         <div class="mb-3">
-          <label class="form-label" for="teach-skill">Skill <span class="text-danger">*</span></label>
-          <select id="teach-skill" v-model="skill" class="form-select" required>
+          <label class="form-label" for="teach-skill">Skill <span class="required-marker" aria-hidden="true">*</span></label>
+          <select
+            id="teach-skill"
+            v-model="skill"
+            class="form-select"
+            :class="{ 'is-invalid': fieldErrors.skill }"
+            :aria-invalid="!!fieldErrors.skill"
+            :aria-describedby="fieldErrors.skill ? 'teach-skill-error' : undefined"
+            required
+            @change="handleFieldChange('skill')"
+            @blur="handleFieldChange('skill')"
+          >
             <option disabled value="">Pick one of your skills</option>
             <option v-for="s in store.profile.skillsTeach" :key="s.name" :value="s.name">{{ s.name }}</option>
           </select>
+          <div v-if="fieldErrors.skill" id="teach-skill-error" class="invalid-feedback d-block">
+            {{ fieldErrors.skill }}
+          </div>
           <small v-if="skillGenre" class="text-muted">Genre: {{ skillGenre }}</small>
           <small v-else class="text-muted">
             Not in the list? Add it under "Skills I can teach" on your profile first.
@@ -366,6 +520,9 @@ async function remove() {
           v-model:title="title"
           v-model:description="description"
           v-model:media="media"
+          :title-error="fieldErrors.title"
+          @title-input="handleFieldChange('title')"
+          @title-blur="handleFieldChange('title')"
         />
 
         <hr />
@@ -373,11 +530,11 @@ async function remove() {
 
         <div class="mb-3">
           <div class="form-check form-check-inline">
-            <input id="mode-physical" v-model="mode" type="radio" value="physical" class="form-check-input" />
+            <input id="mode-physical" v-model="mode" type="radio" value="physical" class="form-check-input" @change="handleModeChange" />
             <label class="form-check-label" for="mode-physical">Physical class</label>
           </div>
           <div class="form-check form-check-inline">
-            <input id="mode-online" v-model="mode" type="radio" value="online" class="form-check-input" />
+            <input id="mode-online" v-model="mode" type="radio" value="online" class="form-check-input" @change="handleModeChange" />
             <label class="form-check-label" for="mode-online">Online class</label>
           </div>
         </div>
@@ -386,23 +543,44 @@ async function remove() {
           <!-- region + a public place, never a home address -->
           <div class="row g-3 mb-3">
             <div class="col-12 col-sm-4">
-              <label class="form-label" for="class-region">Region</label>
-              <select id="class-region" v-model="region" class="form-select" required>
+              <label class="form-label" for="class-region">Region <span class="required-marker" aria-hidden="true">*</span></label>
+              <select
+                id="class-region"
+                v-model="region"
+                class="form-select"
+                :class="{ 'is-invalid': fieldErrors.region }"
+                :aria-invalid="!!fieldErrors.region"
+                :aria-describedby="fieldErrors.region ? 'class-region-error' : undefined"
+                required
+                @change="handleFieldChange('region')"
+                @blur="handleFieldChange('region')"
+              >
                 <option disabled value="">Pick a region</option>
                 <option v-for="r in store.regions" :key="r" :value="r">{{ r }}</option>
               </select>
+              <div v-if="fieldErrors.region" id="class-region-error" class="invalid-feedback d-block">
+                {{ fieldErrors.region }}
+              </div>
             </div>
             <div class="col-12 col-sm-8">
-              <label class="form-label" for="class-place">Public meeting place</label>
+              <label class="form-label" for="class-place">Public meeting place <span class="required-marker" aria-hidden="true">*</span></label>
               <input
                 id="class-place"
                 v-model="place"
                 type="text"
                 class="form-control"
+                :class="{ 'is-invalid': fieldErrors.place }"
+                :aria-invalid="!!fieldErrors.place"
+                :aria-describedby="fieldErrors.place ? 'class-place-error' : undefined"
                 maxlength="100"
                 placeholder="e.g. Bishan Library"
                 required
+                @input="handleFieldChange('place')"
+                @blur="handleFieldChange('place')"
               />
+              <div v-if="fieldErrors.place" id="class-place-error" class="invalid-feedback d-block">
+                {{ fieldErrors.place }}
+              </div>
             </div>
           </div>
           <p class="text-muted small mt-n2">
@@ -424,22 +602,22 @@ async function remove() {
               <label class="form-check-label" for="equip-not-required">Equipment is not required</label>
             </div>
           </div>
-
-          <div class="mb-3">
-            <div class="fw-semibold mb-1">Difficulty</div>
-            <div class="form-check">
-              <input id="diff-standard" v-model="difficulty" type="radio" value="standard" class="form-check-input" />
-              <label class="form-check-label" for="diff-standard">Standard</label>
-            </div>
-            <div class="form-check">
-              <input id="diff-risk" v-model="difficulty" type="radio" value="high_risk" class="form-check-input" />
-              <label class="form-check-label" for="diff-risk">High difficulty</label>
-            </div>
-          </div>
         </template>
 
         <div class="mb-3">
-          <label class="form-label" for="max-capacity">Maximum students per class</label>
+          <div class="fw-semibold mb-1">Difficulty</div>
+          <div class="form-check">
+            <input id="diff-standard" v-model="difficulty" type="radio" value="standard" class="form-check-input" />
+            <label class="form-check-label" for="diff-standard">Standard</label>
+          </div>
+          <div class="form-check">
+            <input id="diff-risk" v-model="difficulty" type="radio" value="high_risk" class="form-check-input" />
+            <label class="form-check-label" for="diff-risk">High difficulty</label>
+          </div>
+        </div>
+
+        <div class="mb-3">
+          <label class="form-label" for="max-capacity">Maximum students per class <span class="required-marker" aria-hidden="true">*</span></label>
           <input
             id="max-capacity"
             v-model.number="maxCapacity"
@@ -447,23 +625,53 @@ async function remove() {
             min="1"
             max="50"
             class="form-control"
+            :class="{ 'is-invalid': fieldErrors.maxCapacity }"
+            :aria-invalid="!!fieldErrors.maxCapacity"
+            :aria-describedby="fieldErrors.maxCapacity ? 'max-capacity-error' : undefined"
             required
+            @input="handleFieldChange('maxCapacity')"
+            @blur="handleFieldChange('maxCapacity')"
           />
+          <div v-if="fieldErrors.maxCapacity" id="max-capacity-error" class="invalid-feedback d-block">
+            {{ fieldErrors.maxCapacity }}
+          </div>
         </div>
 
         <div class="row g-3 mb-3">
-          <div class="col-6">
-            <label class="form-label" for="weeks">Course length (weeks)</label>
-            <input id="weeks" v-model.number="durationWeeks" type="number" min="1" max="52" class="form-control" required />
+          <div class="col-12 col-sm-4">
+            <label class="form-label" for="weeks">Course length (weeks) <span class="required-marker" aria-hidden="true">*</span></label>
+            <input id="weeks" v-model.number="durationWeeks" type="number" min="1" max="52" class="form-control" :class="{ 'is-invalid': fieldErrors.durationWeeks }" :aria-invalid="!!fieldErrors.durationWeeks" :aria-describedby="fieldErrors.durationWeeks ? 'weeks-error' : undefined" required @input="handleFieldChange('durationWeeks')" @blur="handleFieldChange('durationWeeks')" />
+            <div v-if="fieldErrors.durationWeeks" id="weeks-error" class="invalid-feedback d-block">{{ fieldErrors.durationWeeks }}</div>
           </div>
-          <div class="col-6">
-            <label class="form-label" for="lessons">Lessons per week</label>
-            <input id="lessons" v-model.number="lessonsPerWeek" type="number" min="1" max="7" class="form-control" required />
+          <div class="col-12 col-sm-4">
+            <label class="form-label" for="lessons">Lessons per week <span class="required-marker" aria-hidden="true">*</span></label>
+            <input id="lessons" v-model.number="lessonsPerWeek" type="number" min="1" max="7" class="form-control" :class="{ 'is-invalid': fieldErrors.lessonsPerWeek }" :aria-invalid="!!fieldErrors.lessonsPerWeek" :aria-describedby="fieldErrors.lessonsPerWeek ? 'lessons-error' : undefined" required @input="handleFieldChange('lessonsPerWeek')" @blur="handleFieldChange('lessonsPerWeek')" />
+            <div v-if="fieldErrors.lessonsPerWeek" id="lessons-error" class="invalid-feedback d-block">{{ fieldErrors.lessonsPerWeek }}</div>
+          </div>
+          <div class="col-12 col-sm-4">
+            <label class="form-label" for="session-duration">Session duration (minutes) <span class="required-marker" aria-hidden="true">*</span></label>
+            <input
+              id="session-duration"
+              v-model.number="sessionDurationMinutes"
+              type="number"
+              min="1"
+              max="1440"
+              class="form-control"
+              :class="{ 'is-invalid': fieldErrors.sessionDurationMinutes }"
+              :aria-invalid="!!fieldErrors.sessionDurationMinutes"
+              :aria-describedby="fieldErrors.sessionDurationMinutes ? 'session-duration-error' : undefined"
+              required
+              @input="handleFieldChange('sessionDurationMinutes')"
+              @blur="handleFieldChange('sessionDurationMinutes')"
+            />
+            <div v-if="fieldErrors.sessionDurationMinutes" id="session-duration-error" class="invalid-feedback d-block">
+              {{ fieldErrors.sessionDurationMinutes }}
+            </div>
           </div>
         </div>
 
         <hr />
-        <h2 class="h6">Start dates and times</h2>
+        <h2 class="h6">Start dates and times <span class="required-marker" aria-hidden="true">*</span></h2>
         <p class="text-muted small">
           Students book one of these. Add at least one (Singapore time).
         </p>
@@ -491,14 +699,54 @@ async function remove() {
           <li v-if="slots.length === 0" class="list-group-item text-muted">No start times yet</li>
         </ul>
 
-        <div class="d-flex flex-wrap gap-2 mb-4">
-          <input v-model="slotDate" type="date" class="form-control slot-input" :min="today" aria-label="Start date" />
-          <input v-model="slotTime" type="time" class="form-control slot-input" aria-label="Start time" />
-          <button type="button" class="btn btn-outline-secondary" @click="addSlot">Add start time</button>
+        <div class="row g-2 mb-4">
+          <div class="col-12 col-sm-4">
+            <label class="form-label" for="slot-date">Start date <span v-if="slots.length === 0" class="required-marker" aria-hidden="true">*</span></label>
+            <input
+              id="slot-date"
+              v-model="slotDate"
+              type="date"
+              class="form-control"
+              :class="{ 'is-invalid': fieldErrors.slotDate }"
+              :aria-invalid="!!fieldErrors.slotDate"
+              :aria-describedby="fieldErrors.slotDate ? 'slot-date-error' : undefined"
+              :min="today"
+              :required="slots.length === 0"
+              @input="handleFieldChange('slotDate')"
+              @blur="handleFieldChange('slotDate')"
+            />
+            <div v-if="fieldErrors.slotDate" id="slot-date-error" class="invalid-feedback d-block">
+              {{ fieldErrors.slotDate }}
+            </div>
+          </div>
+          <div class="col-12 col-sm-4">
+            <label class="form-label" for="slot-time">Start time <span v-if="slots.length === 0" class="required-marker" aria-hidden="true">*</span></label>
+            <input
+              id="slot-time"
+              v-model="slotTime"
+              type="time"
+              class="form-control"
+              :class="{ 'is-invalid': fieldErrors.slotTime }"
+              :aria-invalid="!!fieldErrors.slotTime"
+              :aria-describedby="fieldErrors.slotTime ? 'slot-time-error' : undefined"
+              :required="slots.length === 0"
+              @input="handleFieldChange('slotTime')"
+              @blur="handleFieldChange('slotTime')"
+            />
+            <div v-if="fieldErrors.slotTime" id="slot-time-error" class="invalid-feedback d-block">
+              {{ fieldErrors.slotTime }}
+            </div>
+          </div>
+          <div class="col-12 col-sm-4 d-flex align-items-end">
+            <button type="button" class="btn btn-outline-secondary" @click="addSlot">Add start time</button>
+          </div>
+        </div>
+        <div v-if="submitAttempted && fieldErrors.slots" class="text-danger small mb-3" role="alert">
+          {{ fieldErrors.slots }}
         </div>
 
         <hr />
-        <h2 class="h6">Stages</h2>
+        <h2 class="h6">Stages <span class="required-marker" aria-hidden="true">*</span></h2>
         <p class="text-muted small">
           Add at least 1 stage. A course can have up to {{ MAX_STAGES }} stages.
         </p>
@@ -515,7 +763,23 @@ async function remove() {
               Delete stage
             </button>
           </div>
-          <input v-model="s.name" class="form-control mb-2" maxlength="60" placeholder="Stage name" required />
+          <label class="form-label" :for="'stage-name-' + i">Stage name <span class="required-marker" aria-hidden="true">*</span></label>
+          <input
+            :id="'stage-name-' + i"
+            v-model="s.name"
+            class="form-control mb-2"
+            :class="{ 'is-invalid': stageTouched[i] && stageErrors[i] }"
+            :aria-invalid="stageTouched[i] && !!stageErrors[i]"
+            :aria-describedby="stageTouched[i] && stageErrors[i] ? 'stage-name-error-' + i : undefined"
+            maxlength="60"
+            placeholder="Stage name"
+            required
+            @input="handleStageChange(i)"
+            @blur="handleStageChange(i)"
+          />
+          <div v-if="stageTouched[i] && stageErrors[i]" :id="'stage-name-error-' + i" class="invalid-feedback d-block mb-2">
+            {{ stageErrors[i] }}
+          </div>
           <textarea v-model="s.description" class="form-control mb-2" rows="2" maxlength="500" placeholder="Short description" />
           <MediaPicker v-if="picturesEnabled" v-model="s.media" :max="3" :allow-video="false" label="Stage pictures (optional)" />
         </div>
@@ -538,6 +802,10 @@ async function remove() {
             You earn <strong>{{ creditCost }} credit{{ creditCost === 1 ? '' : 's' }}</strong>
             for each student, once you and the student both confirm the course is finished.
           </p>
+        </div>
+
+        <div v-if="summaryError" class="alert alert-danger" role="alert" aria-live="assertive">
+          {{ summaryError }}
         </div>
 
         <div class="d-flex gap-2 flex-wrap">
@@ -566,6 +834,11 @@ async function remove() {
 </template>
 
 <style scoped>
+.required-marker {
+  color: #dc3545;
+  font-weight: 700;
+}
+
 .slot-input {
   flex: 1 1 9rem;
   min-width: 0;

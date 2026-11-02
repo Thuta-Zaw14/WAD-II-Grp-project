@@ -20,7 +20,7 @@ const links = [
   { label: 'Courses', to: '/home', paths: ['/home', '/discussion'] },
   { label: 'My sessions', to: '/sessions', paths: ['/sessions', '/chat'] },
   { label: 'Insights', to: '/insights', paths: ['/insights'] },
-  { label: 'Profile', to: '/profile', paths: ['/profile', '/teach', '/learn'] },
+  { label: 'Profile', to: '/profile', paths: ['/profile', '/skills', '/teach', '/learn'] },
 ]
 
 function isActive(link) {

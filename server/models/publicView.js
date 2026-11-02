@@ -65,6 +65,7 @@ export function publicBooking(booking, uid, now = new Date()) {
     learnerName: booking.learnerName,
     slotDate: booking.slotDate,
     slotTime: booking.slotTime,
+    sessionDurationMinutes: booking.sessionDurationMinutes || 60,
     startsAt: booking.startsAt,
     finishAfter: booking.finishAfter,
     cancelBefore: cancelDeadline(startsAt).toISOString(),
