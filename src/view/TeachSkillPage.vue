@@ -391,7 +391,7 @@ async function save() {
     }
 
     toast.show('Course saved.')
-    router.push('/sessions')
+    router.push('/classes')
   } catch (err) {
     await deleteMany(uploaded) // the save failed: do not leave unused files in Storage
     error.value = errorText(err)
@@ -407,7 +407,7 @@ async function remove() {
     const result = await deleteOffer(props.id)
     await deleteMany(result.removedPaths)
     toast.show('Course deleted.')
-    router.push('/sessions')
+    router.push('/classes')
   } catch (err) {
     error.value = errorText(err)
   }
@@ -417,8 +417,8 @@ async function remove() {
 <template>
   <NavBar />
   <main class="container py-4" style="max-width: 760px">
-    <button class="btn btn-link px-0 mb-2" @click="router.push('/sessions')">
-      &larr; Back to sessions
+    <button class="btn btn-link px-0 mb-2" @click="router.push('/classes')">
+      &larr; Back to My classes
     </button>
 
     <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
@@ -767,7 +767,7 @@ async function remove() {
           <button class="btn btn-brand" :disabled="saving">
             {{ saving ? 'Saving...' : 'Save course' }}
           </button>
-          <button type="button" class="btn btn-outline-secondary" :disabled="saving" @click="router.push('/sessions')">
+          <button type="button" class="btn btn-outline-secondary" :disabled="saving" @click="router.push('/classes')">
             Cancel
           </button>
           <button

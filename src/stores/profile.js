@@ -1,7 +1,7 @@
 import { ref, computed } from 'vue'
 import { defineStore } from 'pinia'
 import {
-  createProfile, getMe, updateProfile, getMySkillCards, getOptions, getMyOffers, getMyGoals, errorText,
+  createProfile, getMe, updateProfile, getMySkillCards, getOptions, getMyOffers, getMyGoals, addSlot, errorText,
 } from '../services/api'
 
 export const useProfileStore = defineStore('profile', () => {
@@ -106,6 +106,17 @@ export const useProfileStore = defineStore('profile', () => {
     }
   }
 
+  // Add a start time to one of my courses. Returns '' if it worked, or the reason it did not.
+  async function addCourseSlot(offerId, date, time) {
+    try {
+      const updated = await addSlot(offerId, date, time)
+      myOffers.value = myOffers.value.map((o) => (o.id === updated.id ? updated : o))
+      return ''
+    } catch (err) {
+      return errorText(err)
+    }
+  }
+
   // forget everything, e.g. when someone logs out
   function reset() {
     generation++
@@ -122,6 +133,6 @@ export const useProfileStore = defineStore('profile', () => {
   return {
     profile, categories, regions, knownSkills, skillCards, myOffers, myGoals, coursesLoaded, loading, saving, error, saveError,
     credits,
-    fetchProfile, fetchOptions, fetchSkillCards, fetchMyCourses, saveProfile, reset,
+    fetchProfile, fetchOptions, fetchSkillCards, fetchMyCourses, saveProfile, addCourseSlot, reset,
   }
 })

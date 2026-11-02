@@ -104,6 +104,8 @@ export function publicBooking(booking, uid, now = new Date()) {
     canReport: booking.status === 'booked' && now >= startsAt,
     reportedByMe: reportedByMe,
     reportReason: reportedByMe ? booking.reportReason || '' : '', // only the person who reported sees it
+    removedByTeacher: booking.cancelledBy === 'teacher', // the teacher removed the student
+    removalReason: booking.cancelledBy === 'teacher' ? booking.removalReason || '' : '',
     resolution: booking.resolution || '', // set when an admin settled a report: 'teacher-paid' or 'student-refunded'
     resolutionNote: booking.resolutionNote || '',
     createdAt: booking.createdAt,

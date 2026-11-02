@@ -1,7 +1,7 @@
 import { ref, computed } from 'vue'
 import { defineStore } from 'pinia'
 import {
-  getMyBookings, bookSlot, cancelBooking, confirmBooking, reportBooking,
+  getMyBookings, bookSlot, cancelBooking, confirmBooking, reportBooking, removeStudent,
   submitStageReflection, approveBookingStage, errorText,
 } from '../services/api'
 import { useOffersStore } from './offers'
@@ -143,6 +143,23 @@ export const useBookingsStore = defineStore('bookings', () => {
     }
   }
 
+  // The teacher takes a student off the class. The student is refunded.
+  async function remove(id, reason) {
+    busyId.value = id
+    actionError.value = ''
+    try {
+      const data = await removeStudent(id, reason)
+      replaceBooking(data.booking)
+      useToastStore().show('Student removed. Their credits were refunded.')
+      busyId.value = ''
+      return true
+    } catch (err) {
+      actionError.value = errorText(err)
+      busyId.value = ''
+      return false
+    }
+  }
+
   async function submitReflection(id, stageIndex, reflection) {
     busyId.value = id
     actionError.value = ''
@@ -187,7 +204,7 @@ export const useBookingsStore = defineStore('bookings', () => {
   return {
     bookings, loading, error, actionError, busyId, booking,
     learning, teaching, heldCredits,
-    fetchBookings, refreshBookings, book, cancel, confirm, report, reset,
+    fetchBookings, refreshBookings, book, cancel, confirm, report, remove, reset,
     submitReflection, approveStage,
   }
 })

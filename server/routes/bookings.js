@@ -2,7 +2,7 @@ import express from 'express'
 import { verifyToken } from '../middleware/verifyToken.js'
 import { findDocsWhereEquals } from '../models/dbQuery.js'
 import {
-  cancelBooking, confirmBooking, reportBooking,
+  cancelBooking, confirmBooking, reportBooking, removeStudent,
   submitStageReflection, approveBookingStage,
 } from '../models/bookings.js'
 import { publicBooking, publicOffer, publicMessage, publicChatInfo } from '../models/publicView.js'
@@ -99,6 +99,28 @@ router.post('/:id/cancel', verifyToken, async (req, res) => {
   } catch (err) {
     console.log('cancelBooking failed:', err.message)
     res.status(500).json({ error: 'Could not cancel the booking. Please try again.' })
+  }
+})
+
+// The teacher removes a student from the class, with a reason the student will see.
+router.post('/:id/remove', verifyToken, async (req, res) => {
+  const reason = typeof req.body.reason === 'string' ? req.body.reason.trim() : ''
+  if (reason === '') {
+    return res.status(400).json({ error: 'Please give a reason for removing this student.' })
+  }
+  if (reason.length > maxReasonLength) {
+    return res.status(400).json({ error: 'The reason must be ' + maxReasonLength + ' characters or fewer.' })
+  }
+
+  try {
+    const result = await removeStudent(req.user.uid, req.params.id, reason)
+    if (result.error) {
+      return res.status(result.status).json({ error: result.error })
+    }
+    res.json({ booking: publicBooking(result.booking, req.user.uid) })
+  } catch (err) {
+    console.log('removeStudent failed:', err.message)
+    res.status(500).json({ error: 'Could not remove the student. Please try again.' })
   }
 })
 

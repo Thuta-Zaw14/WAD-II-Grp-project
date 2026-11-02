@@ -135,10 +135,10 @@ const steps = computed(() => [
     key: 'finish',
     icon: '🏁',
     title: 'Track progress and finish',
-    text: 'Chat with your coach or learner in My sessions, write a short reflection after each stage, and mark the course finished when you are done.',
+    text: 'Chat with your coach or learner in My classes, write a short reflection after each stage, and mark the course finished when you are done.',
     tip: 'Your Insights page shows how much you have learned and taught over time.',
-    action: 'Go to My sessions',
-    to: '/sessions',
+    action: 'Go to My classes',
+    to: '/classes',
     done: bookingsStore.bookings.some((b) => b.status === 'finished'),
   },
 ])
@@ -176,7 +176,7 @@ function showTutorial() {
 // ---------- Shortcuts ----------
 const shortcuts = [
   { icon: '🔍', title: 'Browse courses', text: 'Find something new to learn near you.', to: '/courses' },
-  { icon: '📚', title: 'My sessions', text: 'Chats, progress and reflections.', to: '/sessions' },
+  { icon: '📚', title: 'My classes', text: 'Chats, progress and reflections.', to: '/classes' },
   { icon: '📈', title: 'Insights', text: 'Your learning and teaching over time.', to: '/insights' },
   { icon: '✏️', title: 'Teach a skill', text: 'Share what you know and earn credits.', to: '/teach/new' },
 ]
@@ -213,13 +213,13 @@ const shortcuts = [
           </div>
         </div>
         <div class="col-4">
-          <RouterLink to="/sessions" class="stat stat-link">
+          <RouterLink to="/classes" class="stat stat-link">
             <span class="stat-value">{{ activeLearning.length }}</span>
             <span class="stat-label">course{{ activeLearning.length === 1 ? '' : 's' }} learning</span>
           </RouterLink>
         </div>
         <div class="col-4">
-          <RouterLink to="/sessions" class="stat stat-link">
+          <RouterLink to="/classes" class="stat stat-link">
             <span class="stat-value">{{ activeTeaching.length }}</span>
             <span class="stat-label">learner{{ activeTeaching.length === 1 ? '' : 's' }} to teach</span>
           </RouterLink>

@@ -3,7 +3,7 @@ import LoginPage from '../view/LoginPage.vue'
 import LandingPage from '../view/LandingPage.vue'
 import HomePage from '../view/HomePage.vue'
 import CoursesPage from '../view/CoursesPage.vue'
-import SessionsPage from '../view/SessionsPage.vue'
+import MyClassesPage from '../view/MyClassesPage.vue'
 import SessionProgressPage from '../view/SessionProgressPage.vue'
 import ChatPage from '../view/ChatPage.vue'
 import DiscussionPage from '../view/DiscussionPage.vue'
@@ -27,7 +27,8 @@ const router = createRouter({
     { path: '/login', component: LoginPage, meta: { public: true } },
     { path: '/home', component: HomePage },
     { path: '/courses', component: CoursesPage },
-    { path: '/sessions', component: SessionsPage },
+    { path: '/classes', component: MyClassesPage },
+    { path: '/sessions', redirect: '/classes' }, // the old name of My classes
     { path: '/sessions/:id/progress', component: SessionProgressPage, props: true },
     { path: '/chat/:id', component: ChatPage, props: true }, // the private chat of one booking
     { path: '/discussion/:id', component: DiscussionPage, props: true }, // the public discussion of one course

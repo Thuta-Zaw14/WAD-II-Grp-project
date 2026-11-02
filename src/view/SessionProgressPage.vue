@@ -112,8 +112,8 @@ function stageStatus(stage) {
 <template>
   <NavBar />
   <main class="container py-4 progress-page">
-    <button class="btn btn-link px-0 mb-3" type="button" @click="router.push('/sessions')">
-      &larr; Back to My Sessions
+    <button class="btn btn-link px-0 mb-3" type="button" @click="router.push('/classes')">
+      &larr; Back to My classes
     </button>
 
     <LoadingText v-if="loading" text="Loading course progress..." />
