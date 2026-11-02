@@ -5,7 +5,6 @@ import {
   EmailAuthProvider,
   reauthenticateWithCredential,
   updatePassword,
-  verifyBeforeUpdateEmail,
   deleteUser,
 } from 'firebase/auth'
 import { auth } from '../firebase'
@@ -28,7 +27,6 @@ const toast = useToastStore()
 const sections = [
   { id: 'profile', label: 'Profile' },
   { id: 'skills', label: 'Skills' },
-  { id: 'email', label: 'Email' },
   { id: 'password', label: 'Password' },
   { id: 'privacy', label: 'Privacy' },
   { id: 'delete', label: 'Delete account' },
@@ -174,50 +172,40 @@ function loginErrorText(err) {
     'auth/missing-password': 'Please enter your current password.',
     'auth/too-many-requests': 'Too many tries. Please wait a moment and try again.',
     'auth/weak-password': 'That password is too weak.',
-    'auth/email-already-in-use': 'Another account already uses that email.',
-    'auth/invalid-email': 'That email address is not valid.',
     'auth/requires-recent-login': 'Please log out and log in again, then try again.',
   }
   return messages[err.code] || 'Something went wrong: ' + (err.code || err.message)
 }
 
-// Firebase asks for the password again before changing the email or password
+// Firebase asks for the password again before some changes (see changePassword and removeAccount)
 async function checkPassword(password) {
   const credential = EmailAuthProvider.credential(auth.currentUser.email, password)
   await reauthenticateWithCredential(auth.currentUser, credential)
 }
 
-// ---------- Email ----------
-const emailForm = reactive({ newEmail: '', password: '', busy: false, message: '', isError: false })
+// ---------- Password ----------
+// The email someone registered with cannot be changed, only the password.
+// The boxes for a new password only show after "Change Password" is pressed.
+// needsCurrent: Firebase only lets someone who logged in a few minutes ago change their
+// password straight away. Otherwise it asks for the current one first, so that box appears too.
+const pwForm = reactive({
+  open: false, current: '', next: '', repeat: '', needsCurrent: false,
+  show: false, busy: false, message: '', isError: false,
+})
 
-async function changeEmail() {
-  emailForm.message = ''
-  const newEmail = emailForm.newEmail.trim()
-  if (newEmail.toLowerCase() === (auth.currentUser.email || '').toLowerCase()) {
-    emailForm.isError = true
-    emailForm.message = 'That is already your email.'
-    return
-  }
-
-  emailForm.busy = true
-  try {
-    await checkPassword(emailForm.password)
-    await verifyBeforeUpdateEmail(auth.currentUser, newEmail)
-    emailForm.isError = false
-    emailForm.message = 'We sent a link to ' + newEmail + '. Your email changes once you click it.'
-    emailForm.newEmail = ''
-    emailForm.password = ''
-  } catch (err) {
-    emailForm.isError = true
-    emailForm.message = loginErrorText(err)
-  }
-  emailForm.busy = false
+function openPasswordForm() {
+  pwForm.open = true
+  pwForm.message = ''
 }
 
-// ---------- Password ----------
-const pwForm = reactive({
-  current: '', next: '', repeat: '', show: false, busy: false, message: '', isError: false,
-})
+function closePasswordForm() {
+  pwForm.open = false
+  pwForm.current = ''
+  pwForm.next = ''
+  pwForm.repeat = ''
+  pwForm.needsCurrent = false
+  pwForm.show = false
+}
 
 const strength = computed(() => {
   const pw = pwForm.next
@@ -237,26 +225,37 @@ const strength = computed(() => {
 const pwProblem = computed(() => {
   if (pwForm.next !== '' && pwForm.next.length < 8) return 'Use at least 8 characters.'
   if (pwForm.repeat !== '' && pwForm.next !== pwForm.repeat) return 'The new passwords do not match.'
-  if (pwForm.next !== '' && pwForm.next === pwForm.current) return 'Pick a password different from your current one.'
+  if (pwForm.needsCurrent && pwForm.next !== '' && pwForm.next === pwForm.current) {
+    return 'Pick a password different from your current one.'
+  }
   return ''
 })
 
 async function changePassword() {
   pwForm.message = ''
+  if (pwForm.next === '' || pwForm.repeat === '') {
+    pwForm.isError = true
+    pwForm.message = 'Enter the new password in both boxes.'
+    return
+  }
   if (pwProblem.value !== '') return
 
   pwForm.busy = true
   try {
-    await checkPassword(pwForm.current)
+    if (pwForm.needsCurrent) await checkPassword(pwForm.current)
     await updatePassword(auth.currentUser, pwForm.next)
+    closePasswordForm()
     pwForm.isError = false
     pwForm.message = 'Password updated.'
-    pwForm.current = ''
-    pwForm.next = ''
-    pwForm.repeat = ''
+    toast.show('Password updated.')
   } catch (err) {
     pwForm.isError = true
-    pwForm.message = loginErrorText(err)
+    if (err.code === 'auth/requires-recent-login') {
+      pwForm.needsCurrent = true
+      pwForm.message = 'For your safety, enter your current password too, then press Confirm again.'
+    } else {
+      pwForm.message = loginErrorText(err)
+    }
   }
   pwForm.busy = false
 }
@@ -424,46 +423,33 @@ onUnmounted(() => {
             </div>
           </section>
 
-          <!-- Email -->
-          <section id="edit-email" class="part">
-            <p class="eyebrow mb-1">LOGIN</p>
-            <h3 class="h5 mb-2">Email</h3>
-            <p class="small text-muted">
-              You log in with <strong>{{ store.profile.email }}</strong>. We'll send a link to the new address to confirm it.
-            </p>
-            <form @submit.prevent="changeEmail">
-              <div class="row g-2">
-                <div class="col-12 col-md-6">
-                  <label for="edit-new-email" class="form-label">New email</label>
-                  <input id="edit-new-email" v-model="emailForm.newEmail" type="email" class="form-control" required />
-                </div>
-                <div class="col-12 col-md-6">
-                  <label for="edit-email-password" class="form-label">Current password</label>
-                  <input
-                    id="edit-email-password"
-                    v-model="emailForm.password"
-                    type="password"
-                    class="form-control"
-                    autocomplete="current-password"
-                    required
-                  />
-                </div>
-              </div>
-              <button type="submit" class="btn btn-sm btn-outline-secondary mt-3" :disabled="emailForm.busy">
-                {{ emailForm.busy ? 'Sending...' : 'Change email' }}
-              </button>
-              <p v-if="emailForm.message" class="small mt-2 mb-0" :class="emailForm.isError ? 'text-danger' : 'text-success'" role="status">
-                {{ emailForm.message }}
-              </p>
-            </form>
-          </section>
-
-          <!-- Password -->
+          <!-- Email and password (the email can't be changed) -->
           <section id="edit-password" class="part">
             <p class="eyebrow mb-1">LOGIN</p>
-            <h3 class="h5 mb-3">Password</h3>
-            <form @submit.prevent="changePassword">
-              <div class="mb-2">
+            <h3 class="h5 mb-3">Email and password</h3>
+
+            <p class="mb-1">
+              <span class="text-muted">Registered email:</span>
+              <strong class="ms-1">{{ store.profile.email }}</strong>
+            </p>
+            <p class="mb-3">
+              <span class="text-muted">Password:</span>
+              <span class="ms-1 password-dots" aria-label="Hidden password">&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;</span>
+            </p>
+
+            <button
+              v-if="!pwForm.open"
+              type="button"
+              class="btn btn-sm btn-outline-secondary"
+              aria-controls="password-form"
+              aria-expanded="false"
+              @click="openPasswordForm"
+            >
+              Change Password
+            </button>
+
+            <form v-else id="password-form" novalidate @submit.prevent="changePassword">
+              <div v-if="pwForm.needsCurrent" class="mb-2">
                 <label for="edit-pw-current" class="form-label">Current password</label>
                 <input
                   id="edit-pw-current"
@@ -471,32 +457,27 @@ onUnmounted(() => {
                   :type="pwForm.show ? 'text' : 'password'"
                   class="form-control"
                   autocomplete="current-password"
-                  required
                 />
               </div>
-              <div class="row g-2">
-                <div class="col-12 col-md-6">
-                  <label for="edit-pw-new" class="form-label">New password</label>
-                  <input
-                    id="edit-pw-new"
-                    v-model="pwForm.next"
-                    :type="pwForm.show ? 'text' : 'password'"
-                    class="form-control"
-                    autocomplete="new-password"
-                    required
-                  />
-                </div>
-                <div class="col-12 col-md-6">
-                  <label for="edit-pw-repeat" class="form-label">New password again</label>
-                  <input
-                    id="edit-pw-repeat"
-                    v-model="pwForm.repeat"
-                    :type="pwForm.show ? 'text' : 'password'"
-                    class="form-control"
-                    autocomplete="new-password"
-                    required
-                  />
-                </div>
+              <div class="mb-2">
+                <label for="edit-pw-new" class="form-label">New password</label>
+                <input
+                  id="edit-pw-new"
+                  v-model="pwForm.next"
+                  :type="pwForm.show ? 'text' : 'password'"
+                  class="form-control"
+                  autocomplete="new-password"
+                />
+              </div>
+              <div class="mb-2">
+                <label for="edit-pw-repeat" class="form-label">Re-enter new password</label>
+                <input
+                  id="edit-pw-repeat"
+                  v-model="pwForm.repeat"
+                  :type="pwForm.show ? 'text' : 'password'"
+                  class="form-control"
+                  autocomplete="new-password"
+                />
               </div>
 
               <div v-if="strength" class="mt-2">
@@ -512,13 +493,19 @@ onUnmounted(() => {
               </div>
 
               <p v-if="pwProblem" class="small text-danger mt-2 mb-0">{{ pwProblem }}</p>
-              <button type="submit" class="btn btn-sm btn-outline-secondary mt-3" :disabled="pwForm.busy || pwProblem !== ''">
-                {{ pwForm.busy ? 'Updating...' : 'Update password' }}
-              </button>
-              <p v-if="pwForm.message" class="small mt-2 mb-0" :class="pwForm.isError ? 'text-danger' : 'text-success'" role="status">
-                {{ pwForm.message }}
-              </p>
+              <div class="d-flex gap-2 mt-3">
+                <button type="button" class="btn btn-sm btn-outline-secondary" :disabled="pwForm.busy" @click="closePasswordForm(); pwForm.message = ''">
+                  Cancel
+                </button>
+                <button type="submit" class="btn btn-sm btn-kongsi" :disabled="pwForm.busy || pwProblem !== ''">
+                  {{ pwForm.busy ? 'Saving...' : 'Confirm' }}
+                </button>
+              </div>
             </form>
+
+            <p v-if="pwForm.message" class="small mt-2 mb-0" :class="pwForm.isError ? 'text-danger' : 'text-success'" role="status">
+              {{ pwForm.message }}
+            </p>
           </section>
 
           <!-- Privacy -->
@@ -720,6 +707,10 @@ onUnmounted(() => {
 
 .strength-bar {
   height: 6px;
+}
+
+.password-dots {
+  letter-spacing: 2px;
 }
 
 /* Phone: the tabs become a strip along the top */
