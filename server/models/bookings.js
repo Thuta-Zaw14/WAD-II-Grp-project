@@ -26,8 +26,11 @@
 // Every function returns { booking, offer } on success or { status, error } when the
 // request is not allowed (status is the HTTP code the route sends back).
 import { db } from '../config/firebaseAdmin.js'
+import { findDocsWhereEquals } from './dbQuery.js'
 import { MAX_REFERRAL_REWARDS, REFERRAL_REWARD_INVITER, REFERRAL_REWARD_FRIEND } from '../config/credits.js'
 import { slotMoment, cancelDeadline, finishTime, singaporeDate, describeMoment, roleOf, phaseOf } from './bookingRules.js'
+
+const MAX_OPEN_REPORTS = 2 // reports one person can have waiting for an admin at the same time
 
 function fail(status, message) {
   return { status: status, error: message }
@@ -69,6 +72,7 @@ export async function submitStageReflection(uid, bookingId, stageIndex, reflecti
     const booking = snapshot.data()
     if (booking.learnerUid !== uid) return fail(403, 'Only the learner can update course progress.')
     if (booking.status !== 'booked') return fail(409, 'Progress can only be updated for an active course.')
+    if (phaseOf(booking, new Date()) === 'upcoming') return fail(409, 'Reflections open once the course has started.')
 
     const stageNames = Array.isArray(booking.stageNames) ? booking.stageNames : []
     if (!Number.isInteger(stageIndex) || stageIndex < 0 || stageIndex >= stageNames.length) {
@@ -108,6 +112,7 @@ export async function approveBookingStage(uid, bookingId, stageIndex) {
     const booking = snapshot.data()
     if (booking.teacherUid !== uid) return fail(403, 'Only the instructor can approve a stage.')
     if (booking.status !== 'booked') return fail(409, 'Stages can only be approved for an active course.')
+    if (phaseOf(booking, new Date()) === 'upcoming') return fail(409, 'Stages can be approved once the course has started.')
 
     const stageNames = Array.isArray(booking.stageNames) ? booking.stageNames : []
     if (!Number.isInteger(stageIndex) || stageIndex < 0 || stageIndex >= stageNames.length) {
@@ -267,14 +272,13 @@ export async function cancelBooking(uid, bookingId) {
     const learnerRef = db.collection('users').doc(uid)
     const offerSnap = await t.get(offerRef)
     const learnerSnap = await t.get(learnerRef)
+    // without the account there is nowhere to put the refund, so do not cancel and lose the credit
+    if (!learnerSnap.exists) return fail(409, "Your account could not be found, so the credit cannot be refunded.")
 
     // --- writes ---
     const changes = { status: 'cancelled', cancelledAt: now.toISOString(), updatedAt: now.toISOString() }
     t.update(bookingRef, changes)
-
-    if (learnerSnap.exists) {
-      t.update(learnerRef, { credits: (learnerSnap.data().credits || 0) + booking.creditCost }) // refund
-    }
+    t.update(learnerRef, { credits: (learnerSnap.data().credits || 0) + booking.creditCost }) // refund
 
     let offer = null
     if (offerSnap.exists) {
@@ -317,6 +321,8 @@ export async function removeStudent(uid, bookingId, reason) {
     const learnerRef = db.collection('users').doc(booking.learnerUid)
     const offerSnap = await t.get(offerRef)
     const learnerSnap = await t.get(learnerRef)
+    // without the account there is nowhere to put the refund, so do not remove and lose the credit
+    if (!learnerSnap.exists) return fail(409, "The student's account could not be found, so the credit cannot be refunded.")
 
     // --- writes ---
     const now = new Date().toISOString()
@@ -328,10 +334,7 @@ export async function removeStudent(uid, bookingId, reason) {
       updatedAt: now,
     }
     t.update(bookingRef, changes)
-
-    if (learnerSnap.exists) {
-      t.update(learnerRef, { credits: (learnerSnap.data().credits || 0) + booking.creditCost }) // refund
-    }
+    t.update(learnerRef, { credits: (learnerSnap.data().credits || 0) + booking.creditCost }) // refund
 
     if (offerSnap.exists) {
       // free the seat: take the student's uid off the slot
@@ -367,7 +370,8 @@ export async function confirmBooking(uid, bookingId) {
     if (role === '') return fail(403, 'This is not your booking.')
     if (booking.status !== 'booked') return fail(409, 'This booking is ' + booking.status + '.')
 
-    if (Array.isArray(booking.stageProgress) && stageProgressOf(booking).some((stage) => !stage.approved)) {
+    // stageProgressOf also covers older bookings that have stage names but no saved progress yet
+    if (stageProgressOf(booking).some((stage) => !stage.approved)) {
       return fail(409, 'The instructor must approve every course stage before the course can be finished.')
     }
 
@@ -399,7 +403,9 @@ export async function confirmBooking(uid, bookingId) {
       learnerSnap = await t.get(learnerRef)
       const learner = learnerSnap.exists ? learnerSnap.data() : {}
       // a student who was invited, and has not finished a course before, is on their first one now
-      if (learner.referredBy && learner.referralRewarded !== true) {
+      // (a teacher who invited their own student is not paid for it: that would let one person
+      // farm rewards by inviting extra accounts into their own courses)
+      if (learner.referredBy && learner.referralRewarded !== true && learner.referredBy !== booking.teacherUid) {
         inviterRef = db.collection('users').doc(learner.referredBy)
         inviterSnap = await t.get(inviterRef)
       }
@@ -466,6 +472,15 @@ export async function confirmBooking(uid, bookingId) {
 // ---------- Report a problem (either person, once the course has started) ----------
 export async function reportBooking(uid, bookingId, reason) {
   const bookingRef = db.collection('bookings').doc(bookingId)
+
+  // A report holds the credit until an admin decides, so one person cannot keep many bookings
+  // frozen at once: they wait for the admins to settle their open reports first.
+  const mine = await findDocsWhereEquals('bookings', 'reportedBy', uid)
+  if (!mine.status) return fail(500, 'Could not send the report. Please try again.')
+  const openReports = mine.docs.filter((b) => b.status === 'disputed').length
+  if (openReports >= MAX_OPEN_REPORTS) {
+    return fail(429, 'You already have ' + openReports + ' open reports. Please wait for an admin to settle them first.')
+  }
 
   return db.runTransaction(async (t) => {
     const bookingSnap = await t.get(bookingRef)

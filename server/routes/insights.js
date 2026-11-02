@@ -12,11 +12,20 @@ const router = express.Router()
 const WEEK = 7 * 24 * 60 * 60 * 1000
 const weeksShown = 8
 
+// The three collections are read at most once a minute however many people open the page
+// (the totals may be up to a minute old). Without this every visit reads every document.
+const CACHE_MS = 60 * 1000
+let cached = null
+async function loadCollections() {
+  if (cached !== null && Date.now() - cached.at < CACHE_MS) return cached
+  const [users, offers, bookings] = await Promise.all([getAllDocs('users'), getAllDocs('offers'), getAllDocs('bookings')])
+  cached = { at: Date.now(), users: users, offers: offers, bookings: bookings }
+  return cached
+}
+
 router.get('/', verifyToken, async (req, res) => {
   try {
-    const users = await getAllDocs('users')
-    const offers = await getAllDocs('offers')
-    const bookings = await getAllDocs('bookings')
+    const { users, offers, bookings } = await loadCollections()
 
     // ---------- Learners and teachers for each skill ----------
     // Skills are typed by people, so "Tennis" and "tennis" are the same skill. A Map is used

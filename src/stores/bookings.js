@@ -17,6 +17,9 @@ export const useBookingsStore = defineStore('bookings', () => {
   const busyId = ref('') // id of the booking being changed, so its buttons can be switched off
   const booking = ref(false) // true while a new booking is being made
 
+  // reset() bumps this, so the answer to a request started for the previous person is thrown away
+  let generation = 0
+
   // getters
   const learning = computed(() => bookings.value.filter((b) => b.role === 'learner'))
   const teaching = computed(() => bookings.value.filter((b) => b.role === 'teacher'))
@@ -30,11 +33,15 @@ export const useBookingsStore = defineStore('bookings', () => {
 
   // actions
   async function fetchBookings() {
+    const started = generation
     loading.value = true
     error.value = ''
     try {
-      bookings.value = await getMyBookings()
+      const mine = await getMyBookings()
+      if (started !== generation) return
+      bookings.value = mine
     } catch (err) {
+      if (started !== generation) return
       error.value = 'Could not load your sessions: ' + errorText(err)
     }
     loading.value = false
@@ -43,8 +50,10 @@ export const useBookingsStore = defineStore('bookings', () => {
   // Same as fetchBookings, but quiet: no "Loading..." and no error message. Used to keep the
   // unread dots fresh while the page stays open.
   async function refreshBookings() {
+    const started = generation
     try {
-      bookings.value = await getMyBookings()
+      const mine = await getMyBookings()
+      if (started === generation) bookings.value = mine
     } catch (err) {
       console.log('Could not refresh the sessions:', errorText(err))
     }
@@ -184,7 +193,9 @@ export const useBookingsStore = defineStore('bookings', () => {
 
   // forget everything, e.g. when someone logs out
   function reset() {
+    generation++
     bookings.value = []
+    loading.value = false
     error.value = ''
     actionError.value = ''
     busyId.value = ''

@@ -1,6 +1,8 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import LoginPage from '../view/LoginPage.vue'
+import LandingPage from '../view/LandingPage.vue'
 import HomePage from '../view/HomePage.vue'
+import CoursesPage from '../view/CoursesPage.vue'
 import MyClassesPage from '../view/MyClassesPage.vue'
 import SessionProgressPage from '../view/SessionProgressPage.vue'
 import ChatPage from '../view/ChatPage.vue'
@@ -14,14 +16,16 @@ import LearnSkillPage from '../view/LearnSkillPage.vue'
 import AdminPage from '../view/AdminPage.vue'
 import AdminUserProfilePage from '../view/AdminUserProfilePage.vue'
 import { auth } from '../firebase'
-import { checkAdmin } from '../services/api'
+import { checkAdmin, errorText } from '../services/api'
+import { useToastStore } from '../stores/toast'
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
   routes: [
-    { path: '/', redirect: '/login' },
-    { path: '/login', component: LoginPage },
+    { path: '/', component: LandingPage, meta: { public: true } },
+    { path: '/login', component: LoginPage, meta: { public: true } },
     { path: '/home', component: HomePage },
+    { path: '/courses', component: CoursesPage },
     { path: '/classes', component: MyClassesPage },
     { path: '/sessions', redirect: '/classes' }, // the old name of My classes
     { path: '/sessions/:id/progress', component: SessionProgressPage, props: true },
@@ -43,19 +47,24 @@ const router = createRouter({
   ],
 })
 
-// Navigation guard: the admin pages are only opened for admins. Everyone else is sent home.
-// This only decides which PAGE is shown. The real lock is on the server (verifyAdmin.js):
-// even if someone got past this, every admin route there would still say no.
+// Navigation guard: every page except the landing and login pages needs someone logged in, and the admin
+// pages are only opened for admins. Everyone else is sent home.
+// This only decides which PAGE is shown. The real lock is on the server (verifyToken.js and
+// verifyAdmin.js): even if someone got past this, every route there would still say no.
 router.beforeEach(async (to) => {
-  if (!to.meta.requiresAdmin) return true
+  if (to.meta.public) return true
 
   await auth.authStateReady() // wait until Firebase has restored the login
-  if (!auth.currentUser) return '/login'
+  if (!auth.currentUser) return '/'
+
+  if (!to.meta.requiresAdmin) return true
 
   try {
     const result = await checkAdmin()
     return result.isAdmin ? true : '/home'
   } catch (err) {
+    // not a "no": we could not ask (e.g. the network is down), so say so instead of failing silently
+    useToastStore().show('Could not check admin access: ' + errorText(err))
     return '/home'
   }
 })

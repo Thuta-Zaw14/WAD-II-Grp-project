@@ -26,32 +26,47 @@ const progressPercent = computed(() => stageCount.value
   : 0
 )
 
-onMounted(loadBooking)
-onUnmounted(() => clearInterval(refreshTimer))
+let unmounted = false // the page can be left while loadBooking is still waiting
+// the reflection text the server had when we last looked, per stage
+let serverReflections = []
 
+onMounted(loadBooking)
+onUnmounted(() => {
+  unmounted = true
+  clearInterval(refreshTimer)
+})
+
+// Take the server's text for a stage unless the user has typed something of their own there.
 function syncReflectionInputs() {
-  for (let index = 0; index < (booking.value?.stageProgress?.length || 0); index++) {
-    if (reflections.value[index] === undefined) {
-      reflections.value[index] = booking.value.stageProgress[index].reflection || ''
+  const stages = booking.value?.stageProgress || []
+  for (let index = 0; index < stages.length; index++) {
+    const fromServer = stages[index].reflection || ''
+    const untouched = reflections.value[index] === undefined || reflections.value[index] === serverReflections[index]
+    if (untouched) {
+      reflections.value[index] = fromServer
       reflectionErrors.value[index] = ''
     }
+    serverReflections[index] = fromServer
   }
 }
 
 async function loadBooking() {
   await auth.authStateReady()
+  if (unmounted) return
   if (!auth.currentUser) {
     router.push('/login')
     return
   }
 
   await store.fetchBookings()
+  if (unmounted) return
   if (store.error) {
     loadError.value = store.error
   } else if (!booking.value) {
     loadError.value = 'This course progress is not available to your account.'
   } else {
     reflections.value = booking.value.stageProgress.map((stage) => stage.reflection || '')
+    serverReflections = [...reflections.value]
     reflectionErrors.value = booking.value.stageProgress.map(() => '')
     refreshTimer = setInterval(async () => {
       if (document.hidden) return

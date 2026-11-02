@@ -17,22 +17,34 @@ export const useProfileStore = defineStore('profile', () => {
   const saving = ref(false)
   const error = ref('')
   const saveError = ref('')
+  const coursesLoaded = ref(false) // false until fetchMyCourses has worked once, so a failed load is not shown as "no courses"
+
+  // reset() bumps this. A request that was started before the bump belongs to the previous person
+  // (e.g. it was still on its way when they logged out), so its answer is thrown away.
+  let generation = 0
 
   // getter: used by the home page and the profile page, so it lives here
   const credits = computed(() => (profile.value ? profile.value.credits : 0))
 
   // actions
   async function fetchProfile() {
+    const started = generation
     loading.value = true
     error.value = ''
     try {
-      profile.value = await getMe()
+      const me = await getMe()
+      if (started !== generation) return
+      profile.value = me
     } catch (err) {
+      if (started !== generation) return
       if (err.response && err.response.status === 404) {
         // No profile yet (a brand-new account): create it
         try {
-          profile.value = await createProfile()
+          const created = await createProfile()
+          if (started !== generation) return
+          profile.value = created
         } catch (err2) {
+          if (started !== generation) return
           error.value = 'Could not set up your profile: ' + errorText(err2)
         }
       } else {
@@ -55,8 +67,10 @@ export const useProfileStore = defineStore('profile', () => {
   }
 
   async function fetchSkillCards() {
+    const started = generation
     try {
-      skillCards.value = await getMySkillCards()
+      const cards = await getMySkillCards()
+      if (started === generation) skillCards.value = cards
     } catch (err) {
       console.error('Could not load skill cards:', errorText(err))
     }
@@ -64,10 +78,15 @@ export const useProfileStore = defineStore('profile', () => {
 
   // the courses I teach and the skills I want to learn (the profile page and both forms use them)
   async function fetchMyCourses() {
+    const started = generation
     try {
-      myOffers.value = await getMyOffers()
-      myGoals.value = await getMyGoals()
+      const [offers, goals] = await Promise.all([getMyOffers(), getMyGoals()])
+      if (started !== generation) return
+      myOffers.value = offers
+      myGoals.value = goals
+      coursesLoaded.value = true
     } catch (err) {
+      if (started !== generation) return
       error.value = 'Could not load your courses: ' + errorText(err)
     }
   }
@@ -100,7 +119,10 @@ export const useProfileStore = defineStore('profile', () => {
 
   // forget everything, e.g. when someone logs out
   function reset() {
+    generation++
     profile.value = null
+    loading.value = false
+    coursesLoaded.value = false
     skillCards.value = []
     myOffers.value = []
     myGoals.value = []
@@ -109,7 +131,7 @@ export const useProfileStore = defineStore('profile', () => {
   }
 
   return {
-    profile, categories, regions, knownSkills, skillCards, myOffers, myGoals, loading, saving, error, saveError,
+    profile, categories, regions, knownSkills, skillCards, myOffers, myGoals, coursesLoaded, loading, saving, error, saveError,
     credits,
     fetchProfile, fetchOptions, fetchSkillCards, fetchMyCourses, saveProfile, addCourseSlot, reset,
   }

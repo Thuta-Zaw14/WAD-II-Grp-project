@@ -3,12 +3,20 @@ import { db } from '../config/firebaseAdmin.js'
 import { verifyToken } from '../middleware/verifyToken.js'
 import { addDoc, findDocsWhereEquals } from '../models/dbQuery.js'
 import { findProfileSkill, findMediaProblem, cleanMedia, findTitleProblem } from '../models/skillRules.js'
+import { isValidId } from '../models/discussions.js'
 
 // A "learning goal" is a skill the user wants to learn, with a short note and
 // optional pictures. Each goal is its own document in the learnGoals collection
 // (not an array inside the user document), so a user can have as many as they
 // like and other people can read them later.
 const router = express.Router()
+
+// A made-up id such as "a/b" would make Firestore throw (it reads it as a path), so ids like
+// that get a plain 404 here, before any route runs (the same check as routes/admins.js).
+router.param('id', (req, res, next, value) => {
+  if (!isValidId(value)) return res.status(404).json({ error: 'Not found.' })
+  next()
+})
 
 // Returns an error message, or '' if fine
 function findProblem(body, uid, user) {

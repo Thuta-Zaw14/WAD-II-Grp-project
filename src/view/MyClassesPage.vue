@@ -20,15 +20,18 @@ const credits = computed(() => profileStore.credits)
 
 // ---------- Load ----------
 let timer = null
+let unmounted = false // the page can be left while the loads below are still waiting
 onMounted(async () => {
   await auth.authStateReady() // wait until Firebase has restored the login
+  if (unmounted) return
   if (!auth.currentUser) {
     router.push('/login')
     return
   }
-  profileStore.fetchProfile() // for the credits number
-  profileStore.fetchMyCourses() // the courses I host
-  store.fetchBookings()
+  await Promise.all([profileStore.fetchProfile(), store.fetchBookings()]) // credits, and my bookings
+  if (unmounted) return
+  await profileStore.fetchMyCourses() // the courses I host
+  if (unmounted) return
 
   // keep the "new message" dots and the reflections fresh while the page stays open
   timer = setInterval(() => {
@@ -37,6 +40,7 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  unmounted = true
   clearInterval(timer)
 })
 
@@ -367,6 +371,7 @@ async function addSlot() {
 
     <p v-if="store.error" class="text-danger">{{ store.error }}</p>
     <LoadingText v-else-if="store.loading && store.bookings.length === 0" text="Loading your classes..." />
+    <p v-if="profileStore.error" class="alert alert-danger" role="alert">{{ profileStore.error }}</p>
 
     <div class="row g-4">
       <!-- ========== Classes I am attending ========== -->
@@ -430,7 +435,7 @@ async function addSlot() {
             icon="📚"
             title="You have not booked a class yet."
           >
-            <button class="btn btn-sm btn-brand" @click="router.push('/home')">Find a course</button>
+            <button class="btn btn-sm btn-brand" @click="router.push('/courses')">Find a course</button>
           </EmptyState>
         </div>
       </section>
@@ -460,11 +465,12 @@ async function addSlot() {
                 </span>
               </button>
               <button type="button" class="btn btn-sm btn-brand" @click="openSlot(offer)">Add time slot</button>
+              <button type="button" class="btn btn-sm btn-link" @click="router.push('/teach/' + offer.id)">Edit course</button>
             </div>
           </div>
 
           <EmptyState
-            v-if="profileStore.myOffers.length === 0 && !profileStore.loading && !profileStore.error"
+            v-if="profileStore.myOffers.length === 0 && profileStore.coursesLoaded"
             icon="🎓"
             title="You are not hosting a class yet."
           >

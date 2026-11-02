@@ -52,7 +52,6 @@ const slots = ref([]) // [{ date, time, taken }]  taken = students already booke
 const slotDate = ref('')
 const slotTime = ref('')
 
-const showPast = ref(false)
 const original = ref(null) // the saved course when editing
 
 const loading = ref(true)
@@ -240,7 +239,6 @@ onMounted(async () => {
   await store.fetchProfile()
   if (!store.error) await store.fetchOptions()
   if (!store.error) await store.fetchMyCourses()
-  if (!store.error) await store.fetchSkillCards()
   if (store.error) {
     blocked.value = true
     error.value = store.error
@@ -283,23 +281,6 @@ function fillForm(offer) {
   stageErrors.value = stages.value.map(() => '')
   stageTouched.value = stages.value.map(() => false)
   slots.value = (offer.slots || []).map((s) => ({ date: s.date, time: s.time, taken: s.taken || 0 }))
-}
-
-// ---------- Past skills (skill cards I earned) ----------
-// Picking one fills in a starting point: the title, the matching skill, and its
-// sub-skills as stages. Everything can still be changed.
-function pickPastSkill(card) {
-  title.value = card.name
-  for (const s of store.profile.skillsTeach || []) {
-    if (s.name.toLowerCase() === card.name.toLowerCase()) skill.value = s.name
-  }
-  if (card.subskills && card.subskills.length > 0) {
-    stages.value = []
-    for (const sub of card.subskills.slice(0, MAX_STAGES)) {
-      stages.value.push(newStage({ name: sub }))
-    }
-  }
-  showPast.value = false
 }
 
 // ---------- Stages ----------
@@ -410,7 +391,7 @@ async function save() {
     }
 
     toast.show('Course saved.')
-    router.push('/profile')
+    router.push('/classes')
   } catch (err) {
     await deleteMany(uploaded) // the save failed: do not leave unused files in Storage
     error.value = errorText(err)
@@ -426,7 +407,7 @@ async function remove() {
     const result = await deleteOffer(props.id)
     await deleteMany(result.removedPaths)
     toast.show('Course deleted.')
-    router.push('/profile')
+    router.push('/classes')
   } catch (err) {
     error.value = errorText(err)
   }
@@ -436,22 +417,14 @@ async function remove() {
 <template>
   <NavBar />
   <main class="container py-4" style="max-width: 760px">
-    <button class="btn btn-link px-0 mb-2" @click="router.push('/profile')">
-      &larr; Back to profile
+    <button class="btn btn-link px-0 mb-2" @click="router.push('/classes')">
+      &larr; Back to My classes
     </button>
 
     <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
       <h1 class="h4 mb-0">
       {{ isEdit ? 'Edit course' : 'Add a skill I can teach' }}
       </h1>
-      <button
-        v-if="!isEdit && !loading && !blocked && profileReady"
-        type="button"
-        class="btn btn-outline-secondary btn-sm"
-        @click="showPast = !showPast"
-      >
-        {{ showPast ? 'Hide past skills' : 'View past skills' }}
-      </button>
     </div>
 
     <LoadingText v-if="loading" />
@@ -467,24 +440,6 @@ async function remove() {
     </div>
 
     <template v-else>
-      <div v-if="showPast" class="mb-4">
-        <p v-if="!store.skillCards.length" class="text-muted">
-          You haven't completed any courses yet.
-        </p>
-        <div v-else class="row g-2">
-          <div v-for="card in store.skillCards" :key="card.id" class="col-12 col-sm-6">
-            <button
-              type="button"
-              class="btn btn-light border w-100 text-start"
-              @click="pickPastSkill(card)"
-            >
-              <strong>{{ card.name }}</strong>
-              <small class="text-muted d-block">{{ card.category }}</small>
-            </button>
-          </div>
-        </div>
-      </div>
-
       <div v-if="error" class="alert alert-danger" role="alert">
         <strong>Could not save:</strong> {{ error }}
       </div>
@@ -812,7 +767,7 @@ async function remove() {
           <button class="btn btn-brand" :disabled="saving">
             {{ saving ? 'Saving...' : 'Save course' }}
           </button>
-          <button type="button" class="btn btn-outline-secondary" :disabled="saving" @click="router.push('/profile')">
+          <button type="button" class="btn btn-outline-secondary" :disabled="saving" @click="router.push('/classes')">
             Cancel
           </button>
           <button
