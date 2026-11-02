@@ -11,7 +11,7 @@ export async function DupeExist(collection, fieldName, value) {
 export function getAllDocs(colName) {
     return fb.getDocs(fb.collection(db, colName))
     .then((res) => 
-        res.docs.map((d) => ({ id: d.id, ...d.data() }))
+        res.docs.map((d) => ({ id:d.id, ...d.data() }))
         
     )
     .catch((err) => {

@@ -46,103 +46,9 @@ function goToSessions() {
   router.push('/sessions')
 }
 
-// ---------- Fake data for now ----------
-function makeSlots() {
-  return [
-    { id: 1, date: '2026-10-22', time: '10:00', booked: false },
-    { id: 2, date: '2026-10-22', time: '14:00', booked: true },
-    { id: 3, date: '2026-10-24', time: '09:00', booked: false },
-    { id: 4, date: '2026-10-25', time: '16:00', booked: false },
-  ]
-}
 
 // "place" is a public meeting spot, not the coach's home
 const skills = ref([]);
-const skillss = ref([
-  { 
-    id: 1,
-    description: 'Lorem ipsum dolor sit amet, consectetur adipiscing elit. Nunc aliquam ultricies commodo. Vestibulum tincidunt, leo mollis elementum mattis, urna nisl pretium dui, in facilisis ipsum magna quis ligula. Integer non urna sed turpis iaculis rutrum ut vel urna. Nullam congue diam at sapien maximus sodales. Nulla eu enim sit amet est posuere tempus.',
-    skill: 'Tennis',
-    teacher: 'Alex T.',
-    category: 'Sports',
-    place: 'Jurong East Sports Hall',
-    region: 'West',
-    lat: 1.3331, lng: 103.7424 
-  },
-  { 
-    id: 2,
-    description: 'Lorem ipsum dolor sit amet, consectetur adipiscing elit. Nunc aliquam ultricies commodo. Vestibulum tincidunt, leo mollis elementum mattis, urna nisl pretium dui, in facilisis ipsum magna quis ligula. Integer non urna sed turpis iaculis rutrum ut vel urna. Nullam congue diam at sapien maximus sodales. Nulla eu enim sit amet est posuere tempus.',
-    skill: 'Videography',
-    teacher: 'Mei L.',
-    category: 'Creative',
-    place: 'Our Tampines Hub',
-    region: 'East',
-    lat: 1.3547, lng: 103.9421 
-  },
-  { 
-    id: 3,
-    description: 'Lorem ipsum dolor sit amet, consectetur adipiscing elit. Nunc aliquam ultricies commodo. Vestibulum tincidunt, leo mollis elementum mattis, urna nisl pretium dui, in facilisis ipsum magna quis ligula. Integer non urna sed turpis iaculis rutrum ut vel urna. Nullam congue diam at sapien maximus sodales. Nulla eu enim sit amet est posuere tempus.',
-    skill: 'Guitar basics',
-    teacher: 'Daniel K.',
-    category: 'Music',
-    place: 'Somerset Library',
-    region: 'Central',
-    lat: 1.3004, lng: 103.839
-  },
-  { 
-    id: 4,
-    description: 'Lorem ipsum dolor sit amet, consectetur adipiscing elit. Nunc aliquam ultricies commodo. Vestibulum tincidunt, leo mollis elementum mattis, urna nisl pretium dui, in facilisis ipsum magna quis ligula. Integer non urna sed turpis iaculis rutrum ut vel urna. Nullam congue diam at sapien maximus sodales. Nulla eu enim sit amet est posuere tempus.',
-    skill: 'Python intro',
-    teacher: 'Sara R.',
-    category: 'Tech',
-    place: 'Woodlands Regional Library',
-    region: 'North',
-    lat: 1.437, lng: 103.7865 
-  },
-  { 
-    id: 5,
-    skill: 'Photo editing',
-    teacher: 'Jun W.',
-    category: 'Creative',
-    place: 'Bugis Junction',
-    region: 'Central',
-    lat: 1.3, lng: 103.856 
-  },
-  { 
-    id: 6,
-    skill: 'Basketball',
-    teacher: 'Chris P.', 
-    ategory: 'Sports',
-    place: 'Bedok Community Club',
-    region: 'East',
-    lat: 1.324, lng: 103.93 
-  },
-  { 
-    id: 7,
-    skill: 'Tennis',
-    teacher: 'Priya N.',
-    category: 'Sports',
-    place: 'Toa Payoh Sports Hall',
-    region: 'Central',
-    lat: 1.3343, lng: 103.8563
-  },
-  { id: 8,
-    skill: 'Tennis',
-    teacher: 'Marcus L.',
-    category: 'Sports',
-    place: 'Bishan Community Club',
-    region: 'Central',
-    lat: 1.3526, lng: 103.8352 
-  },
-  { id: 9,
-    skill: 'Python intro',
-    teacher: 'Wei H.',
-    category: 'Tech',
-    place: 'Jurong Regional Library',
-    region: 'West',
-    lat: 1.3396, lng: 103.7066
-  },
-])
 
 
 
@@ -260,6 +166,7 @@ onMounted(async () => {
   pinLayer = L.layerGroup().addTo(map)
   drawPins()
   skills.value = await dbq.getAllDocs('sessions');
+  
   // Every skill gets its own list of time slots
   
 })
@@ -280,8 +187,10 @@ function closeBooking() {
   selectedSkill.value = null
 }
 
-function book(slot) {
+async function book(slot) {
   selectedSkill.value.participants.push(displayName.value);
+  console.log(selectedSkill.value.id);
+  await dbsesh.addUserToSession(selectedSkill.value.id,displayName.value);
 }
 
 // Group the slots by date, so each day gets one row of times
