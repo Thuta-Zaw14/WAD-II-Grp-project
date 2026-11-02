@@ -170,3 +170,32 @@ export function publicPost(post, uid, courseTeacherUid) {
     canDelete: !removed && (mine || courseTeacherUid === uid),
   }
 }
+
+// ---------- Reports (the Reports page) ----------
+
+// A report, as its own reporter sees it (no uids).
+// hasNews: an admin changed it since the reporter last opened it (the "!" on the page)
+export function publicReport(report) {
+  return {
+    id: report.id,
+    title: report.title,
+    type: report.type,
+    targetName: report.targetName || '', // the member or course it is about
+    description: report.description,
+    status: report.status,
+    adminNote: report.adminNote || '',
+    createdAt: report.createdAt,
+    updatedAt: report.updatedAt,
+    hasNews: report.seenByReporter === false,
+  }
+}
+
+// A report, as an admin sees it: also who sent it
+export function adminReport(report) {
+  return {
+    ...publicReport(report),
+    targetId: report.targetId || '',
+    reporterUid: report.reporterUid,
+    reporterName: report.reporterName || '',
+  }
+}

@@ -8,6 +8,7 @@ import SessionProgressPage from '../view/SessionProgressPage.vue'
 import ChatPage from '../view/ChatPage.vue'
 import DiscussionPage from '../view/DiscussionPage.vue'
 import InsightsPage from '@/view/Insightspage.vue'
+import ReportsPage from '../view/ReportsPage.vue'
 import ProfilePage from '../view/ProfilePage.vue'
 import PublicProfilePage from '../view/PublicProfilePage.vue'
 import SkillListPage from '../view/SkillListPage.vue'
@@ -31,6 +32,8 @@ const router = createRouter({
     { path: '/chat/:id', component: ChatPage, props: true }, // the private chat of one booking
     { path: '/discussion/:id', component: DiscussionPage, props: true }, // the public discussion of one course
     { path: '/insights', component: InsightsPage },
+    { path: '/reports', component: ReportsPage },
+    { path: '/reports/new', component: ReportsPage, props: { creating: true } }, // the "File new report" form
     { path: '/profile', component: ProfilePage },
     { path: '/members/:uid', component: PublicProfilePage, props: true },
     { path: '/skills/teach', component: SkillListPage, props: { kind: 'teach' } },

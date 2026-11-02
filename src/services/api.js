@@ -178,6 +178,33 @@ export async function reportBooking(id, reason) {
   return response.data
 }
 
+// ---------- Reports (the Reports page) ----------
+// my reports, the one with the newest news first
+export async function getMyReports() {
+  const response = await axios.get(API + '/reports/mine', await authConfig())
+  return response.data
+}
+
+// report = { title, type, description }; type is 'user', 'course', 'website' or 'other'
+export async function createReport(report) {
+  const response = await axios.post(API + '/reports', report, await authConfig())
+  return response.data
+}
+
+// The search box on the report form: type is 'user' or 'course' -> [{ id, name, detail }]
+export async function searchReportTargets(type, typed) {
+  const config = await authConfig()
+  config.params = { type: type, q: typed }
+  const response = await axios.get(API + '/reports/search', config)
+  return response.data
+}
+
+// I opened a report, so its "!" can go
+export async function markReportSeen(id) {
+  const response = await axios.post(API + '/reports/' + encodeURIComponent(id) + '/seen', {}, await authConfig())
+  return response.data
+}
+
 // ---------- Insights ----------
 // Totals worked out by the server: { totalLearners, skills, weekly, invite }
 export async function getInsights() {
