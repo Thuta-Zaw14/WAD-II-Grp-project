@@ -1,0 +1,647 @@
+<script setup>
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
+import { useRouter } from 'vue-router'
+import { onAuthStateChanged } from 'firebase/auth'
+import L from 'leaflet'
+import 'leaflet/dist/leaflet.css'
+import { auth } from '../firebase'
+import { useOffersStore } from '../stores/offers'
+import { useProfileStore } from '../stores/profile'
+import { useBookingsStore } from '../stores/bookings'
+import SkillSearch from '../components/SkillSearch.vue'
+import NavBar from '../components/NavBar.vue'
+import UserAvatar from '../components/UserAvatar.vue'
+import LoadingText from '../components/LoadingText.vue'
+import EmptyState from '../components/EmptyState.vue'
+import heroImg from '../assets/login.jpg'
+import { matches } from '../searchUtils'
+
+const router = useRouter()
+const offersStore = useOffersStore()
+const profileStore = useProfileStore()
+const bookingsStore = useBookingsStore()
+const user = ref(null)
+const credits = computed(() => profileStore.credits)
+
+// "Bob" from "Bob Lim", for the greeting ('' until the profile has a name)
+const firstName = computed(() => {
+  const name = profileStore.profile ? profileStore.profile.name || '' : ''
+  return name.trim().split(' ')[0]
+})
+
+// warnings an admin gave me (shown at the top of the page)
+const warnings = computed(() => {
+  const list = profileStore.profile ? profileStore.profile.warnings : []
+  return Array.isArray(list) ? list : []
+})
+
+// ---------- Login ----------
+function handleAuthChange(firebaseUser) {
+  if (firebaseUser) {
+    user.value = firebaseUser
+    profileStore.fetchProfile()
+
+    // only fetch if the store does not have the offers yet
+    if (offersStore.offers.length === 0) {
+      offersStore.fetchOffers()
+    }
+  } else {
+    profileStore.reset()
+    offersStore.reset() // each offer says which slots are "mine", so the next person must not see these
+    bookingsStore.reset()
+    router.push('/')
+  }
+}
+
+const stopListening = onAuthStateChanged(auth, handleAuthChange)
+
+function goToSessions() {
+  router.push('/sessions')
+}
+
+// the public questions & discussion of a course (anyone can read and write there)
+function openDiscussion(skill) {
+  router.push('/discussion/' + skill.id)
+}
+
+// ---------- Skills (loaded from Firestore through the offers store) ----------
+const skills = computed(() => offersStore.offers)
+
+// ---------- Filters ----------
+const search = ref('')
+const categories = ['All', 'Sports', 'Creative', 'Music', 'Tech']
+const regions = ['All', 'Central', 'West', 'East', 'North']
+const selectedCategory = ref('All')
+const selectedRegion = ref('All')
+
+// Pin colour for each genre
+const categoryColors = {
+  Sports: '#d9822b',
+  Creative: '#8e5ea2',
+  Music: '#3b8ea5',
+  Tech: '#4a7c59',
+}
+
+// ---------- Near me ----------
+const userPos = ref(null) // { lat, lng } once we know where you are
+const userRegion = ref('')
+const locationError = ref('')
+let youMarker = null
+
+// Work out the region from coordinates (rough cut-offs, not official borders)
+function getRegion(lat, lng) {
+  if (lat > 1.4) return 'North'
+  if (lng < 103.75) return 'West'
+  if (lng > 103.9) return 'East'
+  return 'Central'
+}
+
+// Straight-line distance in km. 1 degree is about 111 km (close enough for Singapore)
+function distanceKm(from, to) {
+  const dLat = to.lat - from.lat
+  const dLng = to.lng - from.lng
+  return Math.sqrt(dLat * dLat + dLng * dLng) * 111
+}
+
+function findMe() {
+  locationError.value = ''
+  navigator.geolocation.getCurrentPosition(
+    (pos) => {
+      const lat = pos.coords.latitude
+      const lng = pos.coords.longitude
+      userPos.value = { lat, lng }
+      userRegion.value = getRegion(lat, lng)
+
+      if (youMarker) youMarker.remove()
+      youMarker = L.circleMarker([lat, lng], { radius: 8, color: 'blue' }).addTo(map)
+    },
+    () => {
+      locationError.value = 'Could not get your location. Allow location access in your browser.'
+    }
+  )
+}
+
+function clearLocation() {
+  userPos.value = null
+  userRegion.value = ''
+  youMarker.remove()
+}
+
+// ---------- The list (also used for the map pins) ----------
+const filteredSkills = computed(() => {
+  const results = []
+
+  for (const item of skills.value) {
+    const textMatches = matches(search.value, [item.title, item.skill, item.teacherName, item.category])
+    const categoryMatches =
+      selectedCategory.value === 'All' || item.category === selectedCategory.value
+    const regionMatches = selectedRegion.value === 'All' || item.region === selectedRegion.value
+
+    if (textMatches && categoryMatches && regionMatches) {
+      // online classes have no pin, so they have no distance
+      const hasPin = typeof item.lat === 'number' && typeof item.lng === 'number'
+      const distance = userPos.value && hasPin ? distanceKm(userPos.value, item) : null
+      results.push({ ...item, distance })
+    }
+  }
+
+  // Closest first, once we know where you are
+  if (userPos.value) {
+    results.sort((a, b) => {
+      if (a.distance === null) return 1 // online classes go last
+      if (b.distance === null) return -1
+      return a.distance - b.distance
+    })
+  }
+
+  return results
+})
+
+// ---------- The map ----------
+const mapEl = ref(null)
+let map = null
+let pinLayer = null
+
+function drawPins() {
+  if (!pinLayer) return // the map is not ready yet
+  pinLayer.clearLayers()
+
+  for (const s of filteredSkills.value) {
+    if (typeof s.lat !== 'number' || typeof s.lng !== 'number') continue // online class: no pin
+    const pin = L.circleMarker([s.lat, s.lng], {
+      radius: 10,
+      color: 'white',
+      fillColor: categoryColors[s.category],
+      fillOpacity: 1,
+    })
+    pin.bindTooltip(s.title)
+    pin.on('click', () => openBooking(s)) // clicking a pin opens the booking popup
+    pin.addTo(pinLayer)
+  }
+}
+
+// Redraw the pins whenever the list changes
+watch(filteredSkills, drawPins)
+
+onMounted(() => {
+  map = L.map(mapEl.value).setView([1.3521, 103.8198], 11) // middle of Singapore
+  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '&copy; OpenStreetMap contributors',
+  }).addTo(map)
+  pinLayer = L.layerGroup().addTo(map)
+  drawPins()
+})
+
+onUnmounted(() => {
+  stopListening()
+  if (map) map.remove()
+  map = null
+  pinLayer = null // drawPins stops here if the list changes after the page is gone
+})
+
+// ---------- Booking popup ----------
+// Booking has two steps: click a start time to SELECT it, then press "Confirm booking".
+// Nothing is saved until the second step.
+const selectedId = ref(null) // id of the course in the popup (null = popup closed)
+const chosenSlotId = ref('') // the start time that is selected but not confirmed yet
+const bookedMessage = ref('') // shown after a booking worked
+
+// Looked up from the store each time (not copied), so the seat counts update by themselves
+const selectedSkill = computed(() => {
+  for (const s of skills.value) {
+    if (s.id === selectedId.value) return s
+  }
+  return null
+})
+
+const chosenSlot = computed(() => {
+  if (!selectedSkill.value) return null
+  for (const slot of selectedSkill.value.slots) {
+    if (slot.id === chosenSlotId.value) return slot
+  }
+  return null
+})
+
+// is this my own course? (the server also refuses it)
+function isMine(skill) {
+  return user.value !== null && skill.isMine === true
+}
+
+// have I booked one of this course's start times?
+function hasBooked(skill) {
+  for (const slot of skill.slots) {
+    if (slot.mine) return true
+  }
+  return false
+}
+
+function openBooking(skill) {
+  if (isMine(skill)) return
+  selectedId.value = skill.id
+  chosenSlotId.value = ''
+  bookedMessage.value = ''
+  bookingsStore.actionError = ''
+}
+
+function closeBooking() {
+  selectedId.value = null
+}
+
+// Step 1: select a start time
+function chooseSlot(slot) {
+  if (slot.booked || slot.past || slot.mine || hasBooked(selectedSkill.value)) return
+  chosenSlotId.value = slot.id
+  bookingsStore.actionError = ''
+}
+
+// how a start time button looks
+function slotClass(slot) {
+  if (slot.mine) return 'btn-success'
+  if (slot.id === chosenSlotId.value) return 'btn-accent'
+  if (slot.booked || slot.past) return 'btn-outline-secondary'
+  return 'btn-brand'
+}
+
+// the hover text that explains why a start time cannot be picked
+function slotNote(slot) {
+  if (slot.mine) return 'You booked this start time'
+  if (slot.past) return 'This start time has already passed'
+  if (slot.booked) return 'This start time is full'
+  return ''
+}
+
+// Step 2: confirm
+async function confirmBooking() {
+  if (!chosenSlot.value) return
+  const ok = await bookingsStore.book(selectedSkill.value.id, chosenSlot.value.id)
+  if (ok) {
+    chosenSlotId.value = ''
+    bookedMessage.value = 'Booked! ' + selectedSkill.value.creditCost + ' credit(s) are held until the course is finished.'
+  }
+}
+
+// "Sat, 8 Nov, 14:00" in Singapore time
+function formatTime(iso) {
+  return new Date(iso).toLocaleString('en-SG', {
+    timeZone: 'Asia/Singapore',
+    weekday: 'short',
+    day: 'numeric',
+    month: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+}
+
+// Group the slots by date, so each day gets one row of times
+const slotsByDate = computed(() => {
+  const groups = {}
+  if (!selectedSkill.value) return groups
+
+  for (const slot of selectedSkill.value.slots) {
+    if (!groups[slot.date]) groups[slot.date] = []
+    groups[slot.date].push(slot)
+  }
+  return groups
+})
+
+function resetFilters() {
+  selectedCategory.value = 'All'
+  selectedRegion.value = 'All'
+  search.value = ''
+}
+</script>
+
+<template>
+  <NavBar />
+
+  <div class="container py-4">
+    <!-- e.g. "Your account has been suspended." for a banned person -->
+    <div v-if="profileStore.error" class="alert alert-danger">{{ profileStore.error }}</div>
+
+    <div v-if="warnings.length > 0" class="alert alert-warning">
+      <strong>{{ warnings.length === 1 ? 'You have a warning' : 'You have ' + warnings.length + ' warnings' }} from the Kongsi team.</strong>
+      <ul class="mb-0 mt-1">
+        <li v-for="(w, i) in warnings" :key="i">{{ w.reason }}</li>
+      </ul>
+    </div>
+
+    <!-- Welcome box, with one main button. The photo is only shown on wider screens. -->
+    <section class="hero mb-4">
+      <div class="hero-text">
+        <p class="eyebrow mb-2">Kongsi skill exchange</p>
+        <h1 class="mb-2">Find your next course{{ firstName ? ', ' + firstName : '' }}</h1>
+        <p class="mb-3">Search, filter by genre or region, or pick a pin on the map.</p>
+        <div class="d-flex align-items-center flex-wrap gap-3">
+          <button class="btn btn-brand px-4" @click="router.push('/teach/new')">Teach a skill</button>
+          <span class="credit-pill">You have {{ credits }} time credit{{ credits === 1 ? '' : 's' }}</span>
+        </div>
+      </div>
+      <img :src="heroImg" alt="" class="hero-photo d-none d-md-block" />
+    </section>
+
+    <!-- Search and filters -->
+    <div class="k-card p-3 mb-4">
+      <SkillSearch v-model="search" :skills="skills" />
+
+      <div class="d-flex align-items-center flex-wrap gap-2 mb-2">
+        <span class="small text-muted filter-label">Genre</span>
+        <button
+          v-for="c in categories"
+          :key="c"
+          type="button"
+          class="filter"
+          :class="{ active: selectedCategory === c }"
+          @click="selectedCategory = c"
+        >
+          <span v-if="c !== 'All'" class="dot" :style="{ background: categoryColors[c] }"></span>{{ c }}
+        </button>
+      </div>
+
+      <div class="d-flex align-items-center flex-wrap gap-2 mb-2">
+        <span class="small text-muted filter-label">Region</span>
+        <button
+          v-for="r in regions"
+          :key="r"
+          type="button"
+          class="filter"
+          :class="{ active: selectedRegion === r }"
+          @click="selectedRegion = r"
+        >{{ r }}</button>
+      </div>
+
+      <p class="small mb-0">
+        <a v-if="!userPos" href="#" @click.prevent="findMe">Sort by distance from me</a>
+        <template v-else>
+          <span class="text-muted">You're in the {{ userRegion }} region. Closest first.</span>
+          <a href="#" class="ms-2" @click.prevent="clearLocation">Clear</a>
+        </template>
+        <a
+          v-if="selectedCategory !== 'All' || selectedRegion !== 'All'"
+          href="#"
+          class="ms-3"
+          @click.prevent="resetFilters"
+        >Reset filters</a>
+        <span v-if="locationError" class="ms-2 text-danger">{{ locationError }}</span>
+      </p>
+    </div>
+
+    <!-- On a phone the map shows first, then the list. On desktop they sit side by side. -->
+    <div class="row g-3">
+      <div class="col-lg-7 order-lg-2">
+        <div ref="mapEl" class="map-box"></div>
+      </div>
+
+      <div class="col-lg-5 order-lg-1">
+        <div class="list-pane">
+          <div
+            v-for="s in filteredSkills"
+            :key="s.id"
+            class="card genre-card k-lift mb-3"
+            :class="'cat-' + s.category"
+          >
+            <div class="card-body">
+              <div class="d-flex justify-content-between align-items-center mb-2">
+                <span class="badge rounded-pill text-bg-light">
+                  <span class="dot" :style="{ background: categoryColors[s.category] }"></span>{{ s.category }}
+                </span>
+                <span v-if="hasBooked(s)" class="badge rounded-pill text-bg-success">Booked</span>
+                <small v-else-if="s.distance !== null" class="text-muted">{{ s.distance.toFixed(1) }} km away</small>
+              </div>
+
+              <h2 class="h5 mb-2">{{ s.title }}</h2>
+              <div class="d-flex align-items-center gap-2 mb-2">
+                <UserAvatar :name="s.teacherName" />
+                <span class="text-muted">Taught by {{ s.teacherName }}</span>
+              </div>
+              <p v-if="s.mode === 'online'" class="text-muted small mb-2">💻 Online class</p>
+              <p v-else class="text-muted small mb-2">📍 Meets at {{ s.place }} ({{ s.region }})</p>
+              <p class="mb-3">
+                <span class="credit-pill">{{ s.creditCost }} credit{{ s.creditCost === 1 ? '' : 's' }} to join</span>
+              </p>
+
+              <button v-if="isMine(s)" class="btn btn-outline-secondary w-100" disabled>Your course</button>
+              <button v-else class="btn btn-brand w-100" @click="openBooking(s)">
+                {{ hasBooked(s) ? 'View booking' : 'Book a session' }}
+              </button>
+              <button class="btn btn-sm btn-outline-secondary w-100 mt-2" @click="openDiscussion(s)">
+                Questions &amp; discussion
+              </button>
+            </div>
+          </div>
+
+          <LoadingText v-if="offersStore.loading" text="Loading skills..." />
+          <p v-else-if="offersStore.error" class="text-danger">{{ offersStore.error }}</p>
+          <EmptyState
+            v-else-if="skills.length === 0"
+            icon="🌱"
+            title="No courses yet"
+            text="Be the first to teach something and earn credits."
+          >
+            <button class="btn btn-brand btn-sm" @click="router.push('/teach/new')">Teach a skill</button>
+          </EmptyState>
+          <EmptyState
+            v-else-if="filteredSkills.length === 0"
+            icon="🔍"
+            title="No skills match your filters"
+            text="Try a different genre or region, or clear the search."
+          >
+            <button class="btn btn-outline-secondary btn-sm" @click="resetFilters">Clear search and filters</button>
+          </EmptyState>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Booking popup -->
+  <div
+    v-if="selectedSkill"
+    class="modal d-block"
+    style="background: rgba(0, 0, 0, 0.5)"
+    @click.self="closeBooking"
+  >
+    <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable">
+      <div class="modal-content">
+        <div class="modal-header modal-banner">
+          <div>
+            <h2 class="h5 mb-0">{{ selectedSkill.title }}</h2>
+            <small>Coach: {{ selectedSkill.teacherName }}</small>
+          </div>
+          <button class="btn-close" @click="closeBooking"></button>
+        </div>
+
+        <div class="modal-body">
+          <!-- after a booking worked -->
+          <div v-if="bookedMessage">
+            <div class="alert alert-success">{{ bookedMessage }}</div>
+            <p class="small text-muted">
+              You will find it under My sessions, where you can cancel it while that is still allowed.
+            </p>
+            <button class="btn btn-brand me-2" @click="goToSessions">Go to My sessions</button>
+            <button class="btn btn-outline-secondary" @click="closeBooking">Close</button>
+          </div>
+
+          <template v-else>
+            <p v-if="hasBooked(selectedSkill)" class="alert alert-info small">
+              You have already booked this course. See My sessions.
+            </p>
+            <p v-else class="text-muted">Pick a time, then confirm your booking.</p>
+
+            <p class="small text-muted">
+              {{ selectedSkill.durationWeeks }} week{{ selectedSkill.durationWeeks === 1 ? '' : 's' }},
+              {{ selectedSkill.lessonsPerWeek }} lesson{{ selectedSkill.lessonsPerWeek === 1 ? '' : 's' }} a week.
+              {{ selectedSkill.sessionDurationMinutes || 60 }} minutes per session.
+              One booking covers the whole course.
+            </p>
+
+            <!-- Step 1: select a start time -->
+            <div v-for="(daySlots, date) in slotsByDate" :key="date" class="mb-3">
+              <div class="fw-bold mb-2">{{ date }}</div>
+              <div class="d-flex flex-wrap gap-2">
+                <button
+                  v-for="slot in daySlots"
+                  :key="slot.id"
+                  class="btn btn-sm"
+                  :class="slotClass(slot)"
+                  :disabled="slot.booked || slot.past || slot.mine || hasBooked(selectedSkill)"
+                  :title="slotNote(slot)"
+                  @click="chooseSlot(slot)"
+                >
+                  {{ slot.time }}
+                  <small v-if="slot.mine">(yours)</small>
+                  <small v-else-if="slot.past">(started)</small>
+                  <small v-else-if="slot.booked">(full)</small>
+                  <small v-else>({{ slot.spotsLeft }} left)</small>
+                </button>
+              </div>
+            </div>
+
+            <p v-if="selectedSkill.slots.length === 0" class="text-muted">
+              This coach has no available times yet.
+            </p>
+
+            <!-- Step 2: confirm -->
+            <div v-if="chosenSlot" class="border rounded p-3 mt-3">
+              <p class="fw-semibold mb-1">{{ selectedSkill.title }}: starts {{ chosenSlot.date }} at {{ chosenSlot.time }}</p>
+              <p class="small mb-1">
+                Cost: <strong>{{ selectedSkill.creditCost }} credit{{ selectedSkill.creditCost === 1 ? '' : 's' }}</strong>
+                (you have {{ credits }}). The credit is held until you and the teacher both mark the course finished.
+              </p>
+              <p v-if="chosenSlot.cancellable" class="small text-muted mb-2">
+                You can cancel for a full refund until {{ formatTime(chosenSlot.cancelBefore) }}.
+              </p>
+              <p v-else class="small text-danger mb-2">
+                This starts in less than 24 hours, so once booked it cannot be cancelled.
+              </p>
+              <p v-if="credits < selectedSkill.creditCost" class="small text-danger mb-2">
+                You do not have enough credits. Teach a course to earn some.
+              </p>
+              <p v-if="bookingsStore.actionError" class="small text-danger mb-2">{{ bookingsStore.actionError }}</p>
+
+              <button
+                class="btn btn-brand me-2"
+                :disabled="bookingsStore.booking || credits < selectedSkill.creditCost"
+                @click="confirmBooking"
+              >
+                {{ bookingsStore.booking ? 'Booking...' : 'Confirm booking' }}
+              </button>
+              <button class="btn btn-outline-secondary" @click="chosenSlotId = ''">Choose another time</button>
+            </div>
+
+            <p v-else-if="bookingsStore.actionError" class="small text-danger mt-2">{{ bookingsStore.actionError }}</p>
+          </template>
+        </div>
+      </div>
+    </div>
+  </div>
+</template>
+
+<style scoped>
+.hero {
+  position: relative;
+  overflow: hidden;
+  background: var(--k-surface-alt);
+  border: 1px solid var(--k-border);
+  border-radius: var(--k-radius);
+}
+
+.hero-text {
+  padding: 2rem;
+}
+
+.hero h1 {
+  font-size: 2rem;
+  color: var(--k-accent);
+}
+
+/* The photo fills the right part of the box and fades into it on its left side.
+   (It is hidden on a phone, so the text gets the whole width there.) */
+@media (min-width: 768px) {
+  .hero-text {
+    padding-right: 42%;
+  }
+}
+
+.hero-photo {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 40%;
+  height: 100%;
+  object-fit: cover;
+  -webkit-mask-image: linear-gradient(to right, transparent, black 45%);
+  mask-image: linear-gradient(to right, transparent, black 45%);
+}
+
+.filter-label {
+  width: 52px;
+}
+
+/* the genre and region buttons */
+.filter {
+  padding: 4px 14px;
+  border: 1px solid var(--k-border);
+  border-radius: 999px;
+  background: var(--k-surface);
+  color: var(--k-text);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.filter:hover {
+  border-color: var(--k-brand);
+}
+
+.filter.active {
+  background: var(--k-accent);
+  border-color: var(--k-accent);
+  color: var(--k-on-accent);
+}
+
+/* Small coloured dot for each genre */
+.dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-right: 5px;
+}
+
+.map-box {
+  height: 400px;
+  border: 1px solid var(--k-border);
+  border-radius: var(--k-radius);
+  overflow: hidden;
+}
+
+/* the padding leaves room for a card to rise without being cut off */
+.list-pane {
+  max-height: 560px;
+  overflow-y: auto;
+  padding: 6px 6px 0 2px;
+}
+
+.modal-banner {
+  background: var(--k-surface-alt);
+  color: var(--k-text);
+}
+</style>

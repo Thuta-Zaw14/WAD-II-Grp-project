@@ -255,8 +255,12 @@ router.get('/:uid/public', verifyToken, async (req, res) => {
       }))
       .sort((a, b) => b.dateAttained.localeCompare(a.dateAttained))
 
+    // Courses still in progress are private: only the person themself, and the teacher of that
+    // course, can see how far along they are. Finished courses (skill cards) are shown to everyone.
+    const viewer = req.user.uid
     const progress = bookingsResult.docs
       .filter((booking) => booking.status === 'booked' && Array.isArray(booking.stageNames))
+      .filter((booking) => viewer === uid || booking.teacherUid === viewer)
       .map((booking) => {
         const allStageNames = booking.stageNames
         const stageProgress = Array.isArray(booking.stageProgress) ? booking.stageProgress : []

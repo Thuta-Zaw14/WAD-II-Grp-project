@@ -90,6 +90,10 @@ export async function readMessages(uid, bookingId, after) {
   const role = roleOf(booking, uid)
   if (role === '') return fail(403, 'This is not your booking.')
 
+  // The browser asks every few seconds. When it already has every message (the booking keeps the
+  // count), answer without reading the messages at all, so an idle open chat costs one read.
+  if (after >= (booking.messageCount || 0)) return { booking: booking, messages: [] }
+
   const found = await findDocsWhereEquals('messages', 'bookingId', bookingId)
   if (!found.status) return fail(500, 'Could not load the chat.')
 
