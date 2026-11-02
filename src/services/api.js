@@ -41,9 +41,15 @@ export async function getPublicProfile(uid) {
   return response.data
 }
 
-// changes = { name, bio, region, skillsTeach, skillsLearn } (any of them)
+// changes = { name, bio, region, photo, showRegion, skillsTeach, skillsLearn } (any of them)
 export async function updateProfile(changes) {
   const response = await axios.patch(API + '/users/me', changes, await authConfig())
+  return response.data
+}
+
+// -> { ok, removedPaths } (the pictures of the deleted courses and goals)
+export async function deleteAccount() {
+  const response = await axios.delete(API + '/users/me', await authConfig())
   return response.data
 }
 

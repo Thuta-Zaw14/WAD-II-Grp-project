@@ -3,11 +3,13 @@ import { db } from '../config/firebaseAdmin.js'
 import { verifyToken } from '../middleware/verifyToken.js'
 import { addDocID, findDocsWhereEquals } from '../models/dbQuery.js'
 import { categoryList, regionList } from '../config/skills.js'
-import { findSkillNameProblem, squeezeSpaces } from '../models/skillRules.js'
+import { findSkillNameProblem, squeezeSpaces, allMediaPaths } from '../models/skillRules.js'
+import { deleteDiscussion } from '../models/discussions.js'
 
 const router = express.Router()
 
 const maxSkills = 15 // per list
+const maxPhotoLength = 60000 // characters; a 160px photo is about 15000
 
 // Checks one list of skills: [{ name: 'Badminton', category: 'Sports' }, ...]
 // The name is free text, but the category must be one of our genres.
@@ -62,6 +64,23 @@ function findProblem(body) {
     if (body.region !== '' && !regionList.includes(body.region)) {
       return 'Please pick a region from the list.'
     }
+  }
+
+  // the photo is a small square picture made by the browser (see EditProfileModal.vue)
+  if (body.photo !== undefined) {
+    if (typeof body.photo !== 'string') {
+      return 'Your photo must be a picture.'
+    }
+    if (body.photo !== '' && !body.photo.startsWith('data:image/')) {
+      return 'Your photo must be a picture.'
+    }
+    if (body.photo.length > maxPhotoLength) {
+      return 'Your photo is too large.'
+    }
+  }
+
+  if (body.showRegion !== undefined && typeof body.showRegion !== 'boolean') {
+    return 'showRegion must be true or false.'
   }
 
   for (const field of ['skillsTeach', 'skillsLearn']) {
@@ -146,7 +165,14 @@ router.get('/me', verifyToken, async (req, res) => {
     return res.status(404).json({ error: 'Profile not found' })
   }
 
-  res.json({ id: snapshot.id, ...snapshot.data() })
+  // after someone changes their email in Firebase, copy the new one over
+  const profile = snapshot.data()
+  if (req.user.email && profile.email !== req.user.email) {
+    await snapshot.ref.update({ email: req.user.email })
+    profile.email = req.user.email
+  }
+
+  res.json({ id: snapshot.id, ...profile })
 })
 
 // Save the profile form.
@@ -162,6 +188,8 @@ router.patch('/me', verifyToken, async (req, res) => {
   if (req.body.name !== undefined) changes.name = req.body.name.trim()
   if (req.body.bio !== undefined) changes.bio = req.body.bio.trim()
   if (req.body.region !== undefined) changes.region = req.body.region
+  if (req.body.photo !== undefined) changes.photo = req.body.photo
+  if (req.body.showRegion !== undefined) changes.showRegion = req.body.showRegion
   if (req.body.skillsTeach !== undefined) changes.skillsTeach = cleanSkills(req.body.skillsTeach)
   if (req.body.skillsLearn !== undefined) changes.skillsLearn = cleanSkills(req.body.skillsLearn)
 
@@ -256,7 +284,7 @@ router.get('/:uid/public', verifyToken, async (req, res) => {
       id: snapshot.id,
       name: profile.name || '',
       bio: profile.bio || '',
-      region: profile.region || '',
+      region: profile.showRegion === false ? '' : profile.region || '',
       skillsTeach: Array.isArray(profile.skillsTeach) ? profile.skillsTeach : [],
       skillsLearn: Array.isArray(profile.skillsLearn) ? profile.skillsLearn : [],
       completedCourses: completedCourses,
@@ -266,6 +294,61 @@ router.get('/:uid/public', verifyToken, async (req, res) => {
     console.log('public profile load failed:', err.message)
     res.status(500).json({ error: 'Could not load this profile.' })
   }
+})
+
+// Delete my account.
+// Not allowed while other people depend on it: an active or disputed booking
+// (as learner or teacher), or a course someone has booked.
+// Removes my profile, my courses (and their discussions) and my learning goals.
+// The browser then removes the uploaded pictures and the Firebase login itself.
+router.delete('/me', verifyToken, async (req, res) => {
+  const uid = req.user.uid
+
+  const [asLearner, asTeacher, offers, goals] = await Promise.all([
+    findDocsWhereEquals('bookings', 'learnerUid', uid),
+    findDocsWhereEquals('bookings', 'teacherUid', uid),
+    findDocsWhereEquals('offers', 'teacherUid', uid),
+    findDocsWhereEquals('learnGoals', 'learnerUid', uid),
+  ])
+  if (!asLearner.status || !asTeacher.status || !offers.status || !goals.status) {
+    return res.status(500).json({ error: 'Could not delete your account. Please try again.' })
+  }
+
+  for (const booking of [...asLearner.docs, ...asTeacher.docs]) {
+    if (booking.status === 'booked' || booking.status === 'disputed') {
+      return res.status(409).json({
+        error: 'You still have an active or disputed session. Finish or cancel it first.',
+      })
+    }
+  }
+  for (const offer of offers.docs) {
+    for (const slot of offer.slots || []) {
+      if (Array.isArray(slot.bookedBy) && slot.bookedBy.length > 0) {
+        return res.status(409).json({
+          error: 'Students have booked "' + offer.title + '". Cancel those bookings first.',
+        })
+      }
+    }
+  }
+
+  const removedPaths = []
+  for (const offer of offers.docs) {
+    removedPaths.push(...allMediaPaths(offer.media, offer.stages))
+    await db.collection('offers').doc(offer.id).delete()
+    try {
+      await deleteDiscussion(offer.id)
+    } catch (err) {
+      console.log('deleteDiscussion failed:', err.message)
+    }
+  }
+  for (const goal of goals.docs) {
+    removedPaths.push(...allMediaPaths(goal.media, goal.stages))
+    await db.collection('learnGoals').doc(goal.id).delete()
+  }
+
+  await db.collection('users').doc(uid).delete()
+
+  res.json({ ok: true, removedPaths: removedPaths })
 })
 
 export default router
