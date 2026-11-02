@@ -193,4 +193,79 @@ router.get('/me/skill-cards', verifyToken, async (req, res) => {
   res.json(result.docs)
 })
 
+router.get('/:uid/public', verifyToken, async (req, res) => {
+  const uid = req.params.uid
+  if (!uid || uid.includes('/')) return res.status(400).json({ error: 'Invalid profile.' })
+
+  try {
+    const snapshot = await db.collection('users').doc(uid).get()
+    if (!snapshot.exists || snapshot.data().isBanned === true) {
+      return res.status(404).json({ error: 'Profile not found.' })
+    }
+
+    const [cardsResult, bookingsResult] = await Promise.all([
+      findDocsWhereEquals('skillCards', 'learnerUid', uid),
+      findDocsWhereEquals('bookings', 'learnerUid', uid),
+    ])
+    if (!cardsResult.status || !bookingsResult.status) {
+      return res.status(500).json({ error: 'Could not load this profile.' })
+    }
+
+    const profile = snapshot.data()
+    const completedCourses = cardsResult.docs
+      .map((card) => ({
+        name: card.name || card.title || '',
+        courseTitle: card.courseTitle || card.name || card.title || '',
+        category: card.category || '',
+        subskills: Array.isArray(card.subskills) ? card.subskills : [],
+        issuer: card.issuer || '',
+        dateAttained: card.dateAttained || '',
+        sessionDurationMinutes: card.sessionDurationMinutes || 60,
+        durationWeeks: card.durationWeeks || 1,
+        lessonsPerWeek: card.lessonsPerWeek || 1,
+        completedStageCount: card.completedStageCount || (Array.isArray(card.subskills) ? card.subskills.length : 0),
+      }))
+      .sort((a, b) => b.dateAttained.localeCompare(a.dateAttained))
+
+    const progress = bookingsResult.docs
+      .filter((booking) => booking.status === 'booked' && Array.isArray(booking.stageNames))
+      .map((booking) => {
+        const allStageNames = booking.stageNames
+        const stageProgress = Array.isArray(booking.stageProgress) ? booking.stageProgress : []
+        const completedStages = allStageNames
+          .map((_, index) => stageProgress[index]?.approved === true ? index : -1)
+          .filter((index) => index >= 0)
+        const firstIncomplete = allStageNames.findIndex((_, index) => stageProgress[index]?.approved !== true)
+        const visibleStageCount = firstIncomplete === -1 ? allStageNames.length : firstIncomplete + 1
+        return {
+          bookingId: booking.id,
+          title: booking.title || booking.skill || 'Course',
+          category: booking.category || '',
+          totalStageCount: allStageNames.length,
+          stageNames: allStageNames.slice(0, visibleStageCount),
+          stageStatuses: allStageNames.slice(0, visibleStageCount).map((_, index) => {
+            const stage = stageProgress[index] || {}
+            if (stage.approved === true) return 'approved'
+            return stage.reflection ? 'pending' : 'not_started'
+          }),
+          completedStages: completedStages,
+        }
+      })
+
+    res.json({
+      id: snapshot.id,
+      name: profile.name || '',
+      bio: profile.bio || '',
+      region: profile.region || '',
+      skillsTeach: Array.isArray(profile.skillsTeach) ? profile.skillsTeach : [],
+      skillsLearn: Array.isArray(profile.skillsLearn) ? profile.skillsLearn : [],
+      completedCourses: completedCourses,
+      progress: progress,
+    })
+  } catch (err) {
+    console.log('public profile load failed:', err.message)
+    res.status(500).json({ error: 'Could not load this profile.' })
+  }
+})
+
 export default router

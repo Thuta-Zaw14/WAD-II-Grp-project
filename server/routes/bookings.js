@@ -1,7 +1,10 @@
 import express from 'express'
 import { verifyToken } from '../middleware/verifyToken.js'
 import { findDocsWhereEquals } from '../models/dbQuery.js'
-import { cancelBooking, confirmBooking, reportBooking } from '../models/bookings.js'
+import {
+  cancelBooking, confirmBooking, reportBooking,
+  submitStageReflection, approveBookingStage,
+} from '../models/bookings.js'
 import { publicBooking, publicOffer, publicMessage, publicChatInfo } from '../models/publicView.js'
 import { sendMessage, readMessages, chatIsOpen, MAX_MESSAGE_LENGTH } from '../models/chat.js'
 
@@ -37,6 +40,41 @@ router.get('/mine', verifyToken, async (req, res) => {
     list.push(publicBooking(booking, uid, now))
   }
   res.json(list)
+})
+
+router.post('/:id/progress/stages/:stageIndex/reflection', verifyToken, async (req, res) => {
+  try {
+    const result = await submitStageReflection(
+      req.user.uid,
+      req.params.id,
+      Number(req.params.stageIndex),
+      req.body.reflection
+    )
+    if (result.error) {
+      return res.status(result.status).json({ error: result.error })
+    }
+    res.json({ booking: publicBooking(result.booking, req.user.uid) })
+  } catch (err) {
+    console.log('submitStageReflection failed:', err.message)
+    res.status(500).json({ error: 'Could not submit the stage reflection.' })
+  }
+})
+
+router.post('/:id/progress/stages/:stageIndex/approve', verifyToken, async (req, res) => {
+  try {
+    const result = await approveBookingStage(
+      req.user.uid,
+      req.params.id,
+      Number(req.params.stageIndex)
+    )
+    if (result.error) {
+      return res.status(result.status).json({ error: result.error })
+    }
+    res.json({ booking: publicBooking(result.booking, req.user.uid) })
+  } catch (err) {
+    console.log('approveBookingStage failed:', err.message)
+    res.status(500).json({ error: 'Could not approve the course stage.' })
+  }
 })
 
 // The student cancels (refunded if it is more than 24 hours before the start)

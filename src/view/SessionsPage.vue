@@ -88,6 +88,12 @@ function otherName(b) {
   return b.role === 'learner' ? b.teacherName : b.learnerName
 }
 
+function progressPercent(booking) {
+  const total = booking.stageNames?.length || 0
+  if (!total) return 0
+  return Math.round(((booking.completedStages || []).length / total) * 100)
+}
+
 // one line about what happens to the credits
 function creditNote(b) {
   const cost = creditsText(b.creditCost)
@@ -180,13 +186,26 @@ async function doReport(b) {
 
               <h3 class="h5">{{ b.title }}</h3>
               <p class="text-muted mb-1">
-                {{ b.role === 'learner' ? 'Taught by ' + b.teacherName : 'Student: ' + b.learnerName }}
+                {{ b.role === 'learner' ? 'Taught by ' : 'Student: ' }}
+                <RouterLink v-if="b.otherUid" :to="'/members/' + b.otherUid">
+                  {{ otherName(b) }}
+                </RouterLink>
+                <span v-else>{{ otherName(b) }}</span>
               </p>
               <p class="small mb-1">Starts {{ formatTime(b.startsAt) }}</p>
               <p class="small mb-1">{{ b.sessionDurationMinutes || 60 }} minutes per session</p>
               <p v-if="b.mode === 'online'" class="small text-muted mb-1">Online class</p>
               <p v-else class="small text-muted mb-1">Meets at {{ b.place }} ({{ b.region }})</p>
               <p class="small mb-2">{{ creditNote(b) }}</p>
+
+              <button
+                v-if="b.stageNames?.length"
+                type="button"
+                class="btn btn-sm btn-outline-secondary align-self-start mb-2"
+                @click="router.push('/sessions/' + b.id + '/progress')"
+              >
+                Course Progress
+              </button>
 
               <!-- what happens next -->
               <p v-if="b.phase === 'upcoming' && b.role === 'learner' && b.canCancel" class="small text-muted mb-2">
@@ -301,3 +320,12 @@ async function doReport(b) {
     </template>
   </div>
 </template>
+
+<style scoped>
+.progress-panel {
+  padding: 12px;
+  border: 1px solid var(--k-border);
+  border-radius: 10px;
+  background: var(--k-surface-alt);
+}
+</style>

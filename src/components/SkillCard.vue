@@ -61,6 +61,16 @@ const initials = computed(() => {
         Successfully completed this learning experience.
       </p>
 
+      <div v-if="skill.courseTitle || skill.durationWeeks" class="course-details">
+        <p v-if="skill.courseTitle" class="small mb-1">
+          <strong>Course:</strong> {{ skill.courseTitle }}
+        </p>
+        <p v-if="skill.durationWeeks" class="small text-muted mb-0">
+          {{ skill.durationWeeks }} week{{ skill.durationWeeks === 1 ? '' : 's' }},
+          {{ skill.lessonsPerWeek || 1 }} lesson{{ (skill.lessonsPerWeek || 1) === 1 ? '' : 's' }} per week
+        </p>
+      </div>
+
       <div class="subskills-section">
         <p class="section-label">SKILLS LEARNED</p>
 

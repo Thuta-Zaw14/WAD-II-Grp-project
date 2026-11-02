@@ -36,6 +36,11 @@ export async function getMe() {
   return response.data
 }
 
+export async function getPublicProfile(uid) {
+  const response = await axios.get(API + '/users/' + encodeURIComponent(uid) + '/public', await authConfig())
+  return response.data
+}
+
 // changes = { name, bio, region, skillsTeach, skillsLearn } (any of them)
 export async function updateProfile(changes) {
   const response = await axios.patch(API + '/users/me', changes, await authConfig())
@@ -114,6 +119,24 @@ export async function bookSlot(offerId, slotId) {
 // every booking I am part of, as a student or as a teacher (each has a "role")
 export async function getMyBookings() {
   const response = await axios.get(API + '/bookings/mine', await authConfig())
+  return response.data
+}
+
+export async function submitStageReflection(id, stageIndex, reflection) {
+  const response = await axios.post(
+    API + '/bookings/' + encodeURIComponent(id) + '/progress/stages/' + stageIndex + '/reflection',
+    { reflection },
+    await authConfig()
+  )
+  return response.data
+}
+
+export async function approveBookingStage(id, stageIndex) {
+  const response = await axios.post(
+    API + '/bookings/' + encodeURIComponent(id) + '/progress/stages/' + stageIndex + '/approve',
+    {},
+    await authConfig()
+  )
   return response.data
 }
 

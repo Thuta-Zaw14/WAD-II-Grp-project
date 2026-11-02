@@ -2,10 +2,12 @@ import { createRouter, createWebHistory } from 'vue-router'
 import LoginPage from '../view/LoginPage.vue'
 import HomePage from '../view/HomePage.vue'
 import SessionsPage from '../view/SessionsPage.vue'
+import SessionProgressPage from '../view/SessionProgressPage.vue'
 import ChatPage from '../view/ChatPage.vue'
 import DiscussionPage from '../view/DiscussionPage.vue'
 import InsightsPage from '@/view/Insightspage.vue'
 import ProfilePage from '../view/ProfilePage.vue'
+import PublicProfilePage from '../view/PublicProfilePage.vue'
 import SkillListPage from '../view/SkillListPage.vue'
 import TeachSkillPage from '../view/TeachSkillPage.vue'
 import LearnSkillPage from '../view/LearnSkillPage.vue'
@@ -21,10 +23,12 @@ const router = createRouter({
     { path: '/login', component: LoginPage },
     { path: '/home', component: HomePage },
     { path: '/sessions', component: SessionsPage },
+    { path: '/sessions/:id/progress', component: SessionProgressPage, props: true },
     { path: '/chat/:id', component: ChatPage, props: true }, // the private chat of one booking
     { path: '/discussion/:id', component: DiscussionPage, props: true }, // the public discussion of one course
     { path: '/insights', component: InsightsPage },
     { path: '/profile', component: ProfilePage },
+    { path: '/members/:uid', component: PublicProfilePage, props: true },
     { path: '/skills/teach', component: SkillListPage, props: { kind: 'teach' } },
     { path: '/skills/learn', component: SkillListPage, props: { kind: 'learn' } },
     // props: true hands the :id in the address to the page as a prop

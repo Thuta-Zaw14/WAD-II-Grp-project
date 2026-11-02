@@ -50,6 +50,22 @@ export function publicBooking(booking, uid, now = new Date()) {
   const reportedByMe = booking.reportedBy === uid
   const myReadN = (learnerSide ? booking.learnerReadN : booking.teacherReadN) || 0
   const messageCount = booking.messageCount || 0
+  const allStageNames = Array.isArray(booking.stageNames) ? booking.stageNames : []
+  const savedProgress = Array.isArray(booking.stageProgress) ? booking.stageProgress : []
+  const allStageProgress = allStageNames.map((stageName, index) => {
+    const saved = savedProgress[index] || {}
+    return {
+      stageName: stageName,
+      reflection: typeof saved.reflection === 'string' ? saved.reflection : '',
+      submittedAt: saved.submittedAt || '',
+      approved: saved.approved === true,
+      approvedAt: saved.approvedAt || '',
+    }
+  })
+  const firstIncomplete = allStageProgress.findIndex((stage) => !stage.approved)
+  const visibleStageCount = firstIncomplete === -1 ? allStageNames.length : firstIncomplete + 1
+  const stageNames = allStageNames.slice(0, visibleStageCount)
+  const stageProgress = allStageProgress.slice(0, visibleStageCount)
 
   return {
     id: booking.id,
@@ -63,8 +79,15 @@ export function publicBooking(booking, uid, now = new Date()) {
     place: booking.place,
     teacherName: booking.teacherName,
     learnerName: booking.learnerName,
+    otherUid: role === 'learner' ? booking.teacherUid : booking.learnerUid,
     slotDate: booking.slotDate,
     slotTime: booking.slotTime,
+    totalStageCount: allStageNames.length,
+    stageNames: stageNames,
+    stageProgress: stageProgress,
+    completedStages: stageProgress
+      .map((stage, index) => stage.approved ? index : -1)
+      .filter((index) => index >= 0),
     sessionDurationMinutes: booking.sessionDurationMinutes || 60,
     startsAt: booking.startsAt,
     finishAfter: booking.finishAfter,

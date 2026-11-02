@@ -41,6 +41,94 @@ function bookedByOf(slot) {
   return Array.isArray(slot.bookedBy) ? slot.bookedBy : []
 }
 
+function stageProgressOf(booking) {
+  const stageNames = Array.isArray(booking.stageNames) ? booking.stageNames : []
+  const savedProgress = Array.isArray(booking.stageProgress) ? booking.stageProgress : []
+  return stageNames.map((_, index) => {
+    const saved = savedProgress[index] || {}
+    return {
+      reflection: typeof saved.reflection === 'string' ? saved.reflection : '',
+      submittedAt: saved.submittedAt || '',
+      approved: saved.approved === true,
+      approvedAt: saved.approvedAt || '',
+    }
+  })
+}
+
+export async function submitStageReflection(uid, bookingId, stageIndex, reflection) {
+  const cleanReflection = typeof reflection === 'string' ? reflection.trim() : ''
+  if (!cleanReflection) return fail(400, 'Write a reflection before submitting this stage.')
+  if (cleanReflection.length > 2000) return fail(400, 'A stage reflection must be 2000 characters or fewer.')
+
+  const bookingRef = db.collection('bookings').doc(bookingId)
+  return db.runTransaction(async (t) => {
+    const snapshot = await t.get(bookingRef)
+    if (!snapshot.exists) return fail(404, 'Booking not found.')
+
+    const booking = snapshot.data()
+    if (booking.learnerUid !== uid) return fail(403, 'Only the learner can update course progress.')
+    if (booking.status !== 'booked') return fail(409, 'Progress can only be updated for an active course.')
+
+    const stageNames = Array.isArray(booking.stageNames) ? booking.stageNames : []
+    if (!Number.isInteger(stageIndex) || stageIndex < 0 || stageIndex >= stageNames.length) {
+      return fail(400, 'That course stage is not valid.')
+    }
+
+    const progress = stageProgressOf(booking)
+    if (progress.slice(0, stageIndex).some((stage) => !stage.approved)) {
+      return fail(409, 'Complete the previous stage before submitting this reflection.')
+    }
+    if (progress[stageIndex].approved) return fail(409, 'This stage has already been approved.')
+    const now = new Date().toISOString()
+    progress[stageIndex] = {
+      reflection: cleanReflection,
+      submittedAt: now,
+      approved: false,
+      approvedAt: '',
+    }
+
+    const changes = {
+      stageProgress: progress,
+      progressUpdatedAt: now,
+      updatedAt: now,
+    }
+    t.update(bookingRef, changes)
+
+    return { booking: { id: bookingId, ...booking, ...changes } }
+  })
+}
+
+export async function approveBookingStage(uid, bookingId, stageIndex) {
+  const bookingRef = db.collection('bookings').doc(bookingId)
+  return db.runTransaction(async (t) => {
+    const snapshot = await t.get(bookingRef)
+    if (!snapshot.exists) return fail(404, 'Booking not found.')
+
+    const booking = snapshot.data()
+    if (booking.teacherUid !== uid) return fail(403, 'Only the instructor can approve a stage.')
+    if (booking.status !== 'booked') return fail(409, 'Stages can only be approved for an active course.')
+
+    const stageNames = Array.isArray(booking.stageNames) ? booking.stageNames : []
+    if (!Number.isInteger(stageIndex) || stageIndex < 0 || stageIndex >= stageNames.length) {
+      return fail(400, 'That course stage is not valid.')
+    }
+
+    const progress = stageProgressOf(booking)
+    if (progress.slice(0, stageIndex).some((stage) => !stage.approved)) {
+      return fail(409, 'Approve the previous stage before reviewing this one.')
+    }
+    if (!progress[stageIndex].reflection) return fail(409, 'The learner must submit a reflection first.')
+    if (progress[stageIndex].approved) return fail(409, 'This stage has already been approved.')
+
+    const now = new Date().toISOString()
+    progress[stageIndex] = { ...progress[stageIndex], approved: true, approvedAt: now }
+    const changes = { stageProgress: progress, progressUpdatedAt: now, updatedAt: now }
+    t.update(bookingRef, changes)
+
+    return { booking: { id: bookingId, ...booking, ...changes } }
+  })
+}
+
 // ---------- Book ----------
 export async function bookSlot(uid, offerId, slotId) {
   const offerRef = db.collection('offers').doc(offerId)
@@ -123,11 +211,19 @@ export async function bookSlot(uid, offerId, slotId) {
       region: offer.region || '',
       place: offer.place || '',
       stageNames: stageNames,
+      stageProgress: stageNames.map(() => ({
+        reflection: '',
+        submittedAt: '',
+        approved: false,
+        approvedAt: '',
+      })),
       slotDate: slot.date,
       slotTime: slot.time,
       sessionDurationMinutes: Number.isInteger(offer.sessionDurationMinutes)
         ? offer.sessionDurationMinutes
         : 60,
+      durationWeeks: Number.isInteger(offer.durationWeeks) ? offer.durationWeeks : 1,
+      lessonsPerWeek: Number.isInteger(offer.lessonsPerWeek) ? offer.lessonsPerWeek : 1,
       startsAt: startsAt.toISOString(),
       finishAfter: finishTime(startsAt, weeks).toISOString(), // when both people can confirm it is finished
       creditCost: cost, // the price at the time of booking, even if the teacher changes it later
@@ -215,6 +311,10 @@ export async function confirmBooking(uid, bookingId) {
     if (role === '') return fail(403, 'This is not your booking.')
     if (booking.status !== 'booked') return fail(409, 'This booking is ' + booking.status + '.')
 
+    if (Array.isArray(booking.stageProgress) && stageProgressOf(booking).some((stage) => !stage.approved)) {
+      return fail(409, 'The instructor must approve every course stage before the course can be finished.')
+    }
+
     const now = new Date()
     if (phaseOf(booking, now) !== 'readyToFinish') {
       return fail(409, 'The course is not over yet. You can confirm it from ' + describeMoment(new Date(booking.finishAfter)) + '.')
@@ -289,10 +389,15 @@ export async function confirmBooking(uid, bookingId) {
         bookingId: bookingId,
         offerId: booking.offerId,
         name: booking.skill,
+        courseTitle: booking.title,
         category: booking.category,
         subskills: booking.stageNames || [],
         issuer: booking.teacherName,
         dateAttained: singaporeDate(now),
+        sessionDurationMinutes: booking.sessionDurationMinutes || 60,
+        durationWeeks: booking.durationWeeks || 1,
+        lessonsPerWeek: booking.lessonsPerWeek || 1,
+        completedStageCount: (booking.stageNames || []).length,
         createdAt: now.toISOString(),
       })
     }

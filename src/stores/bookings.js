@@ -1,7 +1,8 @@
 import { ref, computed } from 'vue'
 import { defineStore } from 'pinia'
 import {
-  getMyBookings, bookSlot, cancelBooking, confirmBooking, reportBooking, errorText,
+  getMyBookings, bookSlot, cancelBooking, confirmBooking, reportBooking,
+  submitStageReflection, approveBookingStage, errorText,
 } from '../services/api'
 import { useOffersStore } from './offers'
 import { useProfileStore } from './profile'
@@ -133,6 +134,37 @@ export const useBookingsStore = defineStore('bookings', () => {
     }
   }
 
+  async function submitReflection(id, stageIndex, reflection) {
+    busyId.value = id
+    actionError.value = ''
+    try {
+      const data = await submitStageReflection(id, stageIndex, reflection)
+      replaceBooking(data.booking)
+      busyId.value = ''
+      return true
+    } catch (err) {
+      actionError.value = errorText(err)
+      busyId.value = ''
+      return false
+    }
+  }
+
+  async function approveStage(id, stageIndex) {
+    busyId.value = id
+    actionError.value = ''
+    try {
+      const data = await approveBookingStage(id, stageIndex)
+      replaceBooking(data.booking)
+      useToastStore().show('Stage approved.')
+      busyId.value = ''
+      return true
+    } catch (err) {
+      actionError.value = errorText(err)
+      busyId.value = ''
+      return false
+    }
+  }
+
   // forget everything, e.g. when someone logs out
   function reset() {
     bookings.value = []
@@ -145,5 +177,6 @@ export const useBookingsStore = defineStore('bookings', () => {
     bookings, loading, error, actionError, busyId, booking,
     learning, teaching, heldCredits,
     fetchBookings, refreshBookings, book, cancel, confirm, report, reset,
+    submitReflection, approveStage,
   }
 })
