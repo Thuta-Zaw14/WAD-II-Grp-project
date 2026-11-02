@@ -4,7 +4,7 @@ import { verifyAdmin } from '../middleware/verifyAdmin.js'
 import { isValidId } from '../models/discussions.js'
 import { publicReport, adminReport } from '../models/publicView.js'
 import {
-  createReport, findMyReports, markReportSeen, findAllReports, updateReport,
+  createReport, findMyReports, markReportSeen, findAllReports, updateReport, searchTargets, findTarget,
   REPORT_TYPES, REPORT_STATUSES, MAX_TITLE_LENGTH, MAX_DESCRIPTION_LENGTH, MAX_NOTE_LENGTH,
 } from '../models/reports.js'
 
@@ -20,6 +20,10 @@ function findProblem(body) {
 
   if (!REPORT_TYPES.includes(body.type)) return 'Please pick a type from the list.'
 
+  // a report about a member or a course must say which one
+  if (body.type === 'user' && !isValidId(body.targetId)) return 'Please pick the member you are reporting.'
+  if (body.type === 'course' && !isValidId(body.targetId)) return 'Please pick the course you are reporting.'
+
   const description = typeof body.description === 'string' ? body.description.trim() : ''
   if (description === '') return 'Please describe the problem.'
   if (description.length > MAX_DESCRIPTION_LENGTH) {
@@ -27,6 +31,24 @@ function findProblem(body) {
   }
   return ''
 }
+
+// The search box on the form. type is 'user' or 'course', q is what was typed so far.
+// -> [{ id, name, detail }]
+router.get('/search', verifyToken, async (req, res) => {
+  const type = req.query.type
+  const typed = typeof req.query.q === 'string' ? req.query.q.trim() : ''
+  if (type !== 'user' && type !== 'course') {
+    return res.status(400).json({ error: 'Search for a member or a course.' })
+  }
+  if (typed.length < 2 || typed.length > 60) return res.json([]) // wait for a couple of letters
+
+  try {
+    res.json(await searchTargets(req.user.uid, type, typed))
+  } catch (err) {
+    console.log('searchTargets failed:', err.message)
+    res.status(500).json({ error: 'Could not search right now. Please try again.' })
+  }
+})
 
 // My reports, the one with the newest news first
 router.get('/mine', verifyToken, async (req, res) => {
@@ -45,7 +67,17 @@ router.post('/', verifyToken, async (req, res) => {
   }
 
   try {
-    const result = await createReport(req.user.uid, req.body.title.trim(), req.body.type, req.body.description.trim())
+    // check the member or course picked on the form is real, and keep their name with the report
+    let target = { id: '', name: '' }
+    if (req.body.type === 'user' || req.body.type === 'course') {
+      const found = await findTarget(req.user.uid, req.body.type, req.body.targetId)
+      if (found.error) {
+        return res.status(found.status).json({ error: found.error })
+      }
+      target = { id: req.body.targetId, name: found.name }
+    }
+
+    const result = await createReport(req.user.uid, req.body.title.trim(), req.body.type, target, req.body.description.trim())
     if (result.error) {
       return res.status(result.status).json({ error: result.error })
     }

@@ -191,6 +191,14 @@ export async function createReport(report) {
   return response.data
 }
 
+// The search box on the report form: type is 'user' or 'course' -> [{ id, name, detail }]
+export async function searchReportTargets(type, typed) {
+  const config = await authConfig()
+  config.params = { type: type, q: typed }
+  const response = await axios.get(API + '/reports/search', config)
+  return response.data
+}
+
 // I opened a report, so its "!" can go
 export async function markReportSeen(id) {
   const response = await axios.post(API + '/reports/' + encodeURIComponent(id) + '/seen', {}, await authConfig())

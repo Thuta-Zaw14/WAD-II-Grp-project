@@ -1,15 +1,15 @@
 <script setup>
-import { ref, reactive, watch, onMounted } from 'vue'
+import { ref, reactive, computed, watch, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { auth } from '../firebase'
-import { getMyReports, createReport, markReportSeen, errorText } from '../services/api'
+import { getMyReports, createReport, markReportSeen, searchReportTargets, errorText } from '../services/api'
 import { useToastStore } from '../stores/toast'
 import NavBar from '../components/NavBar.vue'
 import LoadingText from '../components/LoadingText.vue'
 import EmptyState from '../components/EmptyState.vue'
 
 // Two screens on one page: the list of my reports (/reports), and the
-// "File new report" form (/reports/new, where creating is true).
+// "File New Report" form (/reports/new, where creating is true).
 const props = defineProps({
   creating: { type: Boolean, default: false },
 })
@@ -92,49 +92,194 @@ async function toggle(report) {
 // ---------- File a new report ----------
 const maxTitle = 100
 const maxDescription = 1000
-const form = reactive({ title: '', type: '', description: '' })
-const formError = ref('')
+// target: the member or course picked in the search box ({ id, name }), only for those two types
+const form = reactive({ title: '', type: '', target: null, description: '' })
 const sending = ref(false)
+
+// The checks work like the forms under Profile (LearnSkillPage.vue): a field is checked when
+// you leave it, everything is checked on Submit, and the summary lists what still needs fixing.
+const fieldErrors = reactive({ title: '', type: '', target: '', description: '' })
+const submitAttempted = ref(false)
+const summaryError = ref('')
+
+// the extra box under Type: who or what the report is about
+const targetBox = computed(() => {
+  if (form.type === 'user') {
+    return { label: 'Member', placeholder: "Start typing the member's name", missing: 'Pick the member you are reporting from the list.' }
+  }
+  if (form.type === 'course') {
+    return { label: 'Course', placeholder: 'Start typing the course title or teacher', missing: 'Pick the course you are reporting from the list.' }
+  }
+  return null
+})
+
+function validateTitle() {
+  if (form.title.trim() === '') return 'Please enter a report title.'
+  if (form.title.trim().length > maxTitle) return 'The title must be ' + maxTitle + ' characters or fewer.'
+  return ''
+}
+
+function validateType() {
+  return form.type === '' ? 'Please pick a type.' : ''
+}
+
+function validateTarget() {
+  if (!targetBox.value) return ''
+  return form.target ? '' : targetBox.value.missing
+}
+
+function validateDescription() {
+  if (form.description.trim() === '') return 'Please describe the problem.'
+  if (form.description.length > maxDescription) return 'The description must be ' + maxDescription + ' characters or fewer.'
+  return ''
+}
+
+const checks = {
+  title: { check: validateTitle, label: 'Report title' },
+  type: { check: validateType, label: 'Type' },
+  target: { check: validateTarget, label: 'Member or course' },
+  description: { check: validateDescription, label: 'Description' },
+}
+
+// "Report title, Type and Description"
+function listOf(names) {
+  if (names.length <= 1) return names.join('')
+  return names.slice(0, -1).join(', ') + ' and ' + names[names.length - 1]
+}
+
+function validateForm() {
+  submitAttempted.value = true
+  const invalidFields = []
+  for (const field in checks) {
+    fieldErrors[field] = checks[field].check()
+    if (fieldErrors[field]) invalidFields.push(checks[field].label)
+  }
+  summaryError.value = invalidFields.length ? 'Please correct these fields: ' + listOf(invalidFields) + '.' : ''
+  return invalidFields.length === 0
+}
+
+function handleFieldChange(field) {
+  fieldErrors[field] = checks[field].check()
+  if (submitAttempted.value) validateForm()
+  else summaryError.value = ''
+}
+
+// ---------- The member / course search box ----------
+const search = reactive({ text: '', results: [], open: false, loading: false, active: -1, error: '' })
+let searchTimer = null
+let lastAsked = '' // only the answer to the newest search is shown
+
+function resetSearch() {
+  clearTimeout(searchTimer)
+  form.target = null
+  search.text = ''
+  search.results = []
+  search.open = false
+  search.loading = false
+  search.active = -1
+  search.error = ''
+}
+
+// a different type needs a different search, so start again
+function onTypeChange() {
+  resetSearch()
+  fieldErrors.target = ''
+  handleFieldChange('type')
+}
+
+function onSearchInput() {
+  form.target = null // typing again means nothing is picked any more
+  search.active = -1
+  search.error = ''
+  clearTimeout(searchTimer)
+  const typed = search.text.trim()
+  if (typed.length < 2) {
+    search.results = []
+    search.open = false
+    return
+  }
+  // wait until they stop typing for a moment before asking the server
+  searchTimer = setTimeout(() => runSearch(typed), 250)
+}
+
+async function runSearch(typed) {
+  lastAsked = typed
+  search.loading = true
+  search.open = true
+  try {
+    const results = await searchReportTargets(form.type, typed)
+    if (typed !== lastAsked) return
+    search.results = results
+  } catch (err) {
+    if (typed !== lastAsked) return
+    search.results = []
+    search.error = errorText(err)
+  }
+  search.loading = false
+}
+
+function pickTarget(result) {
+  form.target = { id: result.id, name: result.name }
+  search.text = result.name
+  search.open = false
+  search.active = -1
+  handleFieldChange('target')
+}
+
+// arrow keys move through the list, Enter picks, Escape closes it
+function onSearchKey(event) {
+  if (!search.open || search.results.length === 0) return
+  if (event.key === 'ArrowDown') {
+    event.preventDefault()
+    search.active = (search.active + 1) % search.results.length
+  } else if (event.key === 'ArrowUp') {
+    event.preventDefault()
+    search.active = search.active <= 0 ? search.results.length - 1 : search.active - 1
+  } else if (event.key === 'Enter' && search.active >= 0) {
+    event.preventDefault()
+    pickTarget(search.results[search.active])
+  } else if (event.key === 'Escape') {
+    search.open = false
+  }
+}
+
+// leaving the box: close the list (after a moment, so a click on a result still counts)
+function onSearchBlur() {
+  setTimeout(() => {
+    search.open = false
+    handleFieldChange('target')
+  }, 150)
+}
 
 function clearForm() {
   form.title = ''
   form.type = ''
   form.description = ''
-  formError.value = ''
+  resetSearch()
+  for (const field in fieldErrors) fieldErrors[field] = ''
+  submitAttempted.value = false
+  summaryError.value = ''
 }
 
 // the same page is used for the list and the form, so start a clean form each time it opens
 watch(() => props.creating, clearForm)
 
 async function submit() {
-  formError.value = ''
-
-  // quick checks so people get instant feedback (the server checks again)
-  if (form.title.trim() === '') {
-    formError.value = 'Please enter a title.'
-    return
-  }
-  if (form.type === '') {
-    formError.value = 'Please pick a type.'
-    return
-  }
-  if (form.description.trim() === '') {
-    formError.value = 'Please describe the problem.'
-    return
-  }
+  if (!validateForm()) return // the server checks again too
 
   sending.value = true
   try {
     const report = await createReport({
       title: form.title.trim(),
       type: form.type,
+      targetId: form.target ? form.target.id : '',
       description: form.description.trim(),
     })
     reports.value = [report, ...reports.value]
     toast.show('Report sent. An admin will look at it.')
     router.push('/reports')
   } catch (err) {
-    formError.value = errorText(err)
+    summaryError.value = errorText(err)
   }
   sending.value = false
 }
@@ -152,37 +297,118 @@ async function submit() {
 
       <section class="k-card form-card p-4 p-md-5 mt-3">
         <p class="eyebrow mb-1">TELL US WHAT HAPPENED</p>
-        <h1 class="h4 mb-4">File a new report</h1>
+        <h1 class="h4 mb-2">File New Report</h1>
+        <p class="small text-muted mb-4">Fields marked <span class="required-marker" aria-hidden="true">*</span> are required.</p>
+
+        <div v-if="summaryError" class="alert alert-danger" role="alert" aria-live="assertive">
+          {{ summaryError }}
+        </div>
 
         <form novalidate @submit.prevent="submit">
           <div class="mb-3">
-            <label for="report-title" class="form-label">Report title</label>
-            <input id="report-title" v-model="form.title" type="text" class="form-control" :maxlength="maxTitle" required />
+            <label for="report-title" class="form-label">Report Title <span class="required-marker" aria-hidden="true">*</span></label>
+            <input
+              id="report-title"
+              v-model="form.title"
+              type="text"
+              class="form-control"
+              :class="{ 'is-invalid': fieldErrors.title }"
+              :aria-invalid="!!fieldErrors.title"
+              :aria-describedby="fieldErrors.title ? 'report-title-error' : undefined"
+              :maxlength="maxTitle"
+              required
+              @blur="handleFieldChange('title')"
+            />
+            <div v-if="fieldErrors.title" id="report-title-error" class="invalid-feedback d-block">{{ fieldErrors.title }}</div>
           </div>
 
           <div class="mb-3">
-            <label for="report-type" class="form-label">Type</label>
-            <select id="report-type" v-model="form.type" class="form-select" required>
+            <label for="report-type" class="form-label">Type <span class="required-marker" aria-hidden="true">*</span></label>
+            <select
+              id="report-type"
+              v-model="form.type"
+              class="form-select"
+              :class="{ 'is-invalid': fieldErrors.type }"
+              :aria-invalid="!!fieldErrors.type"
+              :aria-describedby="fieldErrors.type ? 'report-type-error' : undefined"
+              required
+              @change="onTypeChange"
+              @blur="handleFieldChange('type')"
+            >
               <option value="" disabled>Pick a type</option>
               <option v-for="t in types" :key="t.value" :value="t.value">{{ t.label }}</option>
             </select>
+            <div v-if="fieldErrors.type" id="report-type-error" class="invalid-feedback d-block">{{ fieldErrors.type }}</div>
+          </div>
+
+          <!-- only for User-based and Course-based reports: who or what it is about -->
+          <div v-if="targetBox" class="mb-3 search-field">
+            <label for="report-target" class="form-label">
+              {{ targetBox.label }} <span class="required-marker" aria-hidden="true">*</span>
+            </label>
+            <input
+              id="report-target"
+              v-model="search.text"
+              type="text"
+              class="form-control"
+              :class="{ 'is-invalid': fieldErrors.target, 'is-valid': form.target }"
+              :placeholder="targetBox.placeholder"
+              autocomplete="off"
+              role="combobox"
+              aria-autocomplete="list"
+              aria-controls="report-target-list"
+              :aria-expanded="search.open ? 'true' : 'false'"
+              :aria-activedescendant="search.active >= 0 ? 'report-target-' + search.active : undefined"
+              :aria-invalid="!!fieldErrors.target"
+              :aria-describedby="fieldErrors.target ? 'report-target-error' : 'report-target-help'"
+              @input="onSearchInput"
+              @keydown="onSearchKey"
+              @blur="onSearchBlur"
+            />
+            <ul v-show="search.open" id="report-target-list" class="search-results" role="listbox">
+              <li v-if="search.loading" class="search-note">Searching...</li>
+              <li v-else-if="search.error" class="search-note text-danger">{{ search.error }}</li>
+              <li v-else-if="search.results.length === 0" class="search-note">
+                No {{ form.type === 'user' ? 'members' : 'ongoing courses' }} match "{{ search.text.trim() }}".
+              </li>
+              <li
+                v-for="(result, index) in search.loading ? [] : search.results"
+                :id="'report-target-' + index"
+                :key="result.id"
+                class="search-option"
+                :class="{ active: index === search.active }"
+                role="option"
+                :aria-selected="index === search.active ? 'true' : 'false'"
+                @mousedown.prevent="pickTarget(result)"
+              >
+                <span class="d-block">{{ result.name }}</span>
+                <small v-if="result.detail" class="text-muted">{{ result.detail }}</small>
+              </li>
+            </ul>
+            <div v-if="fieldErrors.target" id="report-target-error" class="invalid-feedback d-block">{{ fieldErrors.target }}</div>
+            <small v-else id="report-target-help" class="text-muted">
+              {{ form.type === 'user' ? 'Only existing members can be picked.' : 'Only courses that are still running can be picked.' }}
+            </small>
           </div>
 
           <div class="mb-3">
-            <label for="report-description" class="form-label">Description</label>
+            <label for="report-description" class="form-label">Description <span class="required-marker" aria-hidden="true">*</span></label>
             <textarea
               id="report-description"
               v-model="form.description"
               class="form-control"
+              :class="{ 'is-invalid': fieldErrors.description }"
+              :aria-invalid="!!fieldErrors.description"
+              :aria-describedby="fieldErrors.description ? 'report-description-error' : undefined"
               rows="6"
               :maxlength="maxDescription"
-              placeholder="What went wrong? Include names, course titles or pages if they help."
+              placeholder="What went wrong? Include dates, places or pages if they help."
               required
+              @blur="handleFieldChange('description')"
             ></textarea>
+            <div v-if="fieldErrors.description" id="report-description-error" class="invalid-feedback d-block">{{ fieldErrors.description }}</div>
             <small class="text-muted">{{ form.description.length }}/{{ maxDescription }}</small>
           </div>
-
-          <p v-if="formError" class="text-danger small fw-semibold" role="alert">{{ formError }}</p>
 
           <div class="d-flex justify-content-end gap-2 mt-4">
             <button type="button" class="btn btn-outline-secondary" @click="router.push('/reports')">Cancel</button>
@@ -202,7 +428,7 @@ async function submit() {
       </div>
 
       <button type="button" class="new-report k-card w-100 mb-4" @click="router.push('/reports/new')">
-        <span class="fw-semibold">File new report</span>
+        <span class="fw-semibold">File New Report</span>
         <span class="plus" aria-hidden="true">+</span>
       </button>
 
@@ -226,7 +452,7 @@ async function submit() {
           >
             <span class="min-w-0">
               <strong class="d-block text-truncate">{{ report.title }}</strong>
-              <small class="text-muted">{{ typeLabel(report.type) }} &middot; updated {{ formatTime(report.updatedAt) }}</small>
+              <small class="text-muted">{{ typeLabel(report.type) }}<template v-if="report.targetName">: {{ report.targetName }}</template> &middot; updated {{ formatTime(report.updatedAt) }}</small>
             </span>
             <span class="d-flex align-items-center gap-2 flex-shrink-0">
               <span class="report-status" :class="'report-' + report.status">{{ statusLabels[report.status] }}</span>
@@ -273,11 +499,54 @@ async function submit() {
   max-width: 640px;
 }
 
+.required-marker {
+  color: #dc3545;
+  font-weight: 700;
+}
+
+/* the member / course search: the results drop down under the box */
+.search-field {
+  position: relative;
+}
+
+.search-results {
+  position: absolute;
+  left: 0;
+  right: 0;
+  z-index: 10;
+  max-height: 260px;
+  overflow-y: auto;
+  margin: 4px 0 0;
+  padding: 4px;
+  list-style: none;
+  background: var(--k-surface);
+  border: 1px solid var(--k-border);
+  border-radius: 10px;
+  box-shadow: var(--k-shadow-lift);
+}
+
+.search-option {
+  padding: 8px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.search-option:hover,
+.search-option.active {
+  background: var(--k-surface-alt);
+}
+
+.search-note {
+  padding: 8px 10px;
+  color: var(--k-muted);
+  font-size: 0.875rem;
+}
+
 .min-w-0 {
   min-width: 0;
 }
 
-/* the big "File new report +" bar */
+/* the big "File New Report +" bar */
 .new-report {
   display: flex;
   justify-content: space-between;

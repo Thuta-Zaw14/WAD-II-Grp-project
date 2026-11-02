@@ -180,6 +180,7 @@ export function publicReport(report) {
     id: report.id,
     title: report.title,
     type: report.type,
+    targetName: report.targetName || '', // the member or course it is about
     description: report.description,
     status: report.status,
     adminNote: report.adminNote || '',
@@ -193,6 +194,7 @@ export function publicReport(report) {
 export function adminReport(report) {
   return {
     ...publicReport(report),
+    targetId: report.targetId || '',
     reporterUid: report.reporterUid,
     reporterName: report.reporterName || '',
   }
