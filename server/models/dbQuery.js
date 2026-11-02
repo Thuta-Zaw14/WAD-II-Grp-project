@@ -1,3 +1,4 @@
+import { execute, arrayContains } from 'firebase/firestore/pipelines';
 import db from './db';
 import * as fb from 'firebase/firestore';
 
@@ -49,7 +50,14 @@ export function addDoc(col, doc) {
         return {status: false, error: err }
     })
 }
-
+export function dbArrayContain(col,fieldName,val) {
+    return fb.getDocs(fb.query(fb.collection(db,col), fb.where(fieldName, 'array-contains', val)))
+    .then((res) => res.docs.map((d) => ({ id: d.id, ...d.data() })))
+    .catch((err) => {
+        console.log(err);
+        return [];
+    })
+}
 export function addDocID(col, doc, id) {
     fb.setDoc(fb.doc(db,col,id),doc)
     .then(res => {

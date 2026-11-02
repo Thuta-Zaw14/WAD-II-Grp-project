@@ -41,7 +41,11 @@ export async function seshSummary() {
     fb.getDocs(fb.query(fb.collection()))
 
 }
+export async function getMySessions(user) {
+    const seshs = await dbQuery.dbArrayContain('sessions','participants',user);
+    return seshs;
 
+}
 export async function seshAll() {
 
 }

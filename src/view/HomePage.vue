@@ -9,6 +9,7 @@ import { getMe } from '../services/api'
 import SkillSearch from '../components/SkillSearch.vue'
 import { matches } from '../searchUtils'
 import * as dbq from '../../server/models/dbQuery'
+import * as dbsesh from '../../server/models/Sessions'
 const router = useRouter()
 const user = ref(null)
 const credits = ref(0)
@@ -260,9 +261,7 @@ onMounted(async () => {
   drawPins()
   skills.value = await dbq.getAllDocs('sessions');
   // Every skill gets its own list of time slots
-  for (const s of skills.value) {
-    s.timeslot = makeSlots()
-  }
+  
 })
 
 onUnmounted(() => {
@@ -282,8 +281,7 @@ function closeBooking() {
 }
 
 function book(slot) {
-  if (slot.booked) return
-  slot.booked = true
+  selectedSkill.value.participants.push(displayName.value);
 }
 
 // Group the slots by date, so each day gets one row of times
@@ -292,9 +290,13 @@ const slotsByDate = computed(() => {
   if (!selectedSkill.value) return groups
 
   for (const slot of selectedSkill.value.timeslot) {
-    console.log(slot)
-    if (!groups[slot.date]) groups[slot.date] = []
-    groups[slot.date].push(slot)
+    let temp = {}
+    temp.time = slot.slice(0,4);
+    temp.date = slot.slice(5);
+    let cur = selectedSkill.value.participants.length;
+    temp.bookable = cur < selectedSkill.value.capacity;
+    if (!groups[temp.date]) groups[temp.date] = []
+    groups[temp.date].push(temp)
   }
   return groups
 })
@@ -318,6 +320,7 @@ function goToInsights() {
       <a href="#" class="text-decoration-none text-dark" @click.prevent="goToSessions">My sessions</a>
       <a href="#" class="text-decoration-none text-dark" @click.prevent="goToInsights">Insights</a>
       <small v-if="user" class="text-muted d-none d-md-inline">{{ user.email }}</small>
+      <button class="btn btn-lg" @click="dbsesh.getMySessions('Danny Lu Sing Ho')">Fuck me!</button>
       <button class="btn btn-sm" @click="logout">Log out</button>
     </div>
   </nav>
@@ -442,8 +445,8 @@ function goToInsights() {
                 v-for="slot in daySlots"
                 :key="slot.id"
                 class="btn btn-sm"
-                :class="slot.booked ? 'btn-outline-secondary' : 'btn-brand'"
-                :disabled="slot.booked"
+                :class="(!slot.bookable || selectedSkill.participants.includes(displayName.value)) ? 'btn-outline-secondary' : 'btn-brand'"
+                :disabled="!slot.bookable"
                 @click="book(slot)"
               >
                 {{ slot.time }}
