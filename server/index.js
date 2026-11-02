@@ -10,6 +10,7 @@ import insightRoutes from './routes/insights.js'
 import adminRoutes from './routes/admins.js'
 import discussionRoutes from './routes/discussions.js'
 import messageReportRoutes from './routes/messageReports.js'
+import reportRoutes from './routes/reports.js'
 
 const app = express()
 
@@ -26,6 +27,7 @@ app.use('/api/insights', insightRoutes)
 app.use('/api/admins', adminRoutes)
 app.use('/api/discussions', discussionRoutes)
 app.use('/api/message-reports', messageReportRoutes)
+app.use('/api/reports', reportRoutes)
 
 const port = process.env.PORT || 3000
 
