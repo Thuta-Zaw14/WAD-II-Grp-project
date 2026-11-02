@@ -45,3 +45,4 @@ server/*-firebase-adminsdk-*.json
 
 # Local AI assistant instructions
 CLAUDE.md
+*.md
