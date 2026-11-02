@@ -38,6 +38,7 @@ const listEl = ref(null)
 let lastN = 0 // how many posts the server had when we last asked
 let fetching = false // so two requests never run at once
 let timer = null
+let unmounted = false // the page can be left while onMounted is still waiting
 
 function stopChecking() {
   clearInterval(timer)
@@ -148,6 +149,7 @@ function formatTime(iso) {
 
 onMounted(async () => {
   await auth.authStateReady() // after a refresh Firebase needs a moment to restore the login
+  if (unmounted) return
   if (!auth.currentUser) {
     router.push('/login')
     return
@@ -159,14 +161,17 @@ onMounted(async () => {
   }, checkEverySeconds * 1000)
 })
 
-onUnmounted(stopChecking)
+onUnmounted(() => {
+  unmounted = true
+  stopChecking()
+})
 </script>
 
 <template>
   <NavBar />
 
   <div class="container py-4 discussion-container">
-    <a href="#" class="back-link small" @click.prevent="router.push('/home')">&larr; Back to courses</a>
+    <a href="#" class="back-link small" @click.prevent="router.push('/courses')">&larr; Back to courses</a>
 
     <div class="p-4 mt-2 mb-3 banner">
       <h1 class="h4 mb-1">Questions &amp; discussion</h1>

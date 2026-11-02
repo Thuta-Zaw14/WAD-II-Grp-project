@@ -8,13 +8,20 @@ export const useOffersStore = defineStore('offers', () => {
   const loading = ref(false)
   const error = ref('')
 
+  // reset() bumps this, so the answer to a request started for the previous person is thrown away
+  let generation = 0
+
   // action
   async function fetchOffers() {
+    const started = generation
     loading.value = true
     error.value = ''
     try {
-      offers.value = await getOffers()
+      const all = await getOffers()
+      if (started !== generation) return
+      offers.value = all
     } catch (err) {
+      if (started !== generation) return
       error.value = 'Could not load skills: ' + errorText(err)
     }
     loading.value = false
@@ -27,7 +34,9 @@ export const useOffersStore = defineStore('offers', () => {
 
   // forget everything, e.g. when someone logs out (each offer says which slots are "mine")
   function reset() {
+    generation++
     offers.value = []
+    loading.value = false
     error.value = ''
   }
 

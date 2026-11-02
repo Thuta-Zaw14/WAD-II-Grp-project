@@ -15,14 +15,18 @@ const credits = computed(() => profileStore.credits)
 
 // ---------- Load ----------
 let timer = null
+let unmounted = false // the page can be left while the loads below are still waiting
 onMounted(async () => {
   await auth.authStateReady() // wait until Firebase has restored the login
+  if (unmounted) return
   if (!auth.currentUser) {
     router.push('/login')
     return
   }
-  profileStore.fetchProfile() // for the credits number
-  store.fetchBookings()
+  await Promise.all([profileStore.fetchProfile(), store.fetchBookings()])
+  if (unmounted) return
+  await profileStore.fetchMyCourses()
+  if (unmounted) return
 
   // keep the "new message" dots fresh while the page stays open
   timer = setInterval(() => {
@@ -31,6 +35,7 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  unmounted = true
   clearInterval(timer)
 })
 
@@ -38,16 +43,16 @@ onUnmounted(() => {
 const sections = computed(() => [
   {
     key: 'learning',
-    title: 'Courses I am learning',
+    title: 'Learning Sessions',
     list: store.learning,
     icon: '📚',
     empty: 'You have not booked anything yet.',
     button: 'Find a course',
-    to: '/home',
+    to: '/courses',
   },
   {
     key: 'teaching',
-    title: 'Courses I teach',
+    title: 'Teaching Sessions',
     list: store.teaching,
     icon: '🎓',
     empty: 'Nobody has booked one of your courses yet.',
@@ -169,7 +174,51 @@ async function doReport(b) {
 
     <p v-if="store.error" class="text-danger">{{ store.error }}</p>
     <LoadingText v-else-if="store.loading && store.bookings.length === 0" text="Loading your sessions..." />
+    <p v-if="profileStore.error" class="alert alert-danger" role="alert">{{ profileStore.error }}</p>
     <div v-if="store.actionError" class="alert alert-danger">{{ store.actionError }}</div>
+
+    <section class="mb-4">
+      <div class="d-flex justify-content-between align-items-center gap-2 mb-3">
+        <h2 class="h5 mb-0">Courses I Teach</h2>
+        <button type="button" class="btn btn-sm btn-kongsi" @click="router.push('/teach/new')">
+          + Offer a course
+        </button>
+      </div>
+
+      <div v-if="profileStore.myOffers.length" class="row g-3">
+        <div v-for="offer in profileStore.myOffers" :key="offer.id" class="col-12 col-sm-6 col-lg-4">
+          <article class="card h-100">
+            <div class="card-body d-flex flex-column">
+              <span class="badge rounded-pill text-bg-light align-self-start mb-2">{{ offer.category }}</span>
+              <h3 class="h5">{{ offer.title }}</h3>
+              <p class="small text-muted mb-1">
+                {{ offer.mode === 'online' ? 'Online' : offer.region + ' · ' + offer.place }}
+              </p>
+              <p class="small text-muted mb-3">
+                {{ offer.slots?.length || 0 }} start time{{ offer.slots?.length === 1 ? '' : 's' }}
+                · {{ offer.sessionDurationMinutes || 60 }} minutes per session
+              </p>
+              <button
+                type="button"
+                class="btn btn-sm btn-outline-secondary mt-auto align-self-start"
+                @click="router.push('/teach/' + offer.id)"
+              >
+                Edit course
+              </button>
+            </div>
+          </article>
+        </div>
+      </div>
+      <EmptyState
+        v-else-if="profileStore.coursesLoaded"
+        icon="🎓"
+        title="No courses offered yet"
+      >
+        <button type="button" class="btn btn-sm btn-brand" @click="router.push('/teach/new')">
+          Offer a course
+        </button>
+      </EmptyState>
+    </section>
 
     <!-- The same card is used for both lists below -->
     <template v-for="section in sections" :key="section.key">

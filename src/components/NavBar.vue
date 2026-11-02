@@ -17,7 +17,8 @@ const bookingsStore = useBookingsStore()
 
 // "paths" are the addresses where the link is highlighted, e.g. a chat belongs to My sessions
 const links = [
-  { label: 'Courses', to: '/home', paths: ['/home', '/discussion'] },
+  { label: 'Home', to: '/home', paths: ['/home'] },
+  { label: 'Courses', to: '/courses', paths: ['/courses', '/discussion'] },
   { label: 'My sessions', to: '/sessions', paths: ['/sessions', '/chat'] },
   { label: 'Insights', to: '/insights', paths: ['/insights'] },
   { label: 'Profile', to: '/profile', paths: ['/profile', '/skills', '/teach', '/learn'] },
@@ -47,7 +48,7 @@ async function logout() {
   profileStore.reset()
   offersStore.reset()
   bookingsStore.reset()
-  router.push('/login')
+  router.push('/')
 }
 </script>
 
@@ -72,7 +73,9 @@ async function logout() {
       </nav>
 
       <div class="ms-auto d-flex align-items-center gap-2">
-        <small v-if="profileStore.profile" class="text-muted d-none d-xl-inline">{{ profileStore.profile.email }}</small>
+        <small v-if="profileStore.profile" class="text-muted d-none d-xl-inline">
+          {{ profileStore.profile.name?.trim() || auth.currentUser?.displayName || 'Set display name' }}
+        </small>
         <span class="credit-pill" title="Your time credits">{{ credits }} credit{{ credits === 1 ? '' : 's' }}</span>
         <button type="button" class="btn btn-sm btn-outline-secondary" @click="logout">Log out</button>
       </div>

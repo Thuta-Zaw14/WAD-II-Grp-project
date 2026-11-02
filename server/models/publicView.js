@@ -34,7 +34,9 @@ export function publicOffer(offer, uid) {
   for (const slot of offer.slots || []) {
     slots.push(publicSlot(slot, uid))
   }
-  return { ...offer, title: offer.title || offer.skill, slots: slots }
+  // the teacher's uid stays on the server: the browser only needs to know whether the course is mine
+  const { teacherUid, ...rest } = offer
+  return { ...rest, title: offer.title || offer.skill, isMine: teacherUid === uid, slots: slots }
 }
 
 // One booking, as seen by the person asking (uid). The flags canCancel, canConfirm and
