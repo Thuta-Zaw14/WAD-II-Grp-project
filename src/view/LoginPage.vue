@@ -26,8 +26,9 @@ if (inviteCode !== '') {
   localStorage.removeItem('inviteRef')
 }
 
-// someone who followed an invite link most likely needs to sign up
-const isSignup = ref(inviteCode !== '')
+// someone who followed an invite link (or pressed "Sign up" on the landing page) most likely
+// needs to sign up
+const isSignup = ref(inviteCode !== '' || route.query.mode === 'signup')
 const isError = ref(false)
 
 const email = ref('')
@@ -37,6 +38,15 @@ const message = ref('')
 function switchMode() {
   isSignup.value = !isSignup.value
   message.value = ''
+}
+
+// The flip swaps in a new card, so the button that was pressed is gone. Put keyboard focus on
+// the same button in the new card, so a keyboard user is not sent back to the top of the page.
+// (after-enter only runs after a switch, never on the first load.)
+const switchButton = ref(null)
+
+function focusSwitch() {
+  if (switchButton.value) switchButton.value.focus()
 }
 
 async function submit() {
@@ -82,48 +92,62 @@ async function goToStartPage() {
 <template>
   <div class="page">
     <header class="top text-center py-3 py-md-4">
-      <h1 class="h3 m-0 d-inline-flex align-items-center gap-2">
-        <LogoMark />
-        Kongsi
+      <h1 class="h3 m-0">
+        <RouterLink to="/" class="home-link d-inline-flex align-items-center gap-2 text-decoration-none">
+          <LogoMark />
+          Kongsi
+        </RouterLink>
       </h1>
     </header>
 
-    <div class="row g-0" :class="{ 'flex-md-row-reverse': isSignup }">
+    <!-- The photo stays on its side and fades to the other one; the card flips over -->
+    <div class="row g-0">
       <div class="col-12 col-md-6 image-panel">
-        <img :src="isSignup ? signupImg : loginImg" alt="Students teaching each other" />
+        <Transition name="fade">
+          <img :key="isSignup" :src="isSignup ? signupImg : loginImg" alt="Students teaching each other" />
+        </Transition>
       </div>
 
       <div class="col-12 col-md-6 form-side d-flex align-items-center justify-content-center p-3 p-md-4">
-        <form class="card border-0 shadow w-100 p-4 p-md-5" @submit.prevent="submit">
-          <h2 class="h4 mb-4">{{ isSignup ? 'Sign up' : 'Login' }}</h2>
+        <Transition name="flip" mode="out-in" @after-enter="focusSwitch">
+          <form :key="isSignup" class="card border-0 shadow w-100 p-4 p-md-5" @submit.prevent="submit">
+            <h2 class="h4 mb-4">{{ isSignup ? 'Sign up' : 'Login' }}</h2>
 
-          <p v-if="isSignup && inviteCode !== ''" class="small text-muted mb-3">
-            A friend invited you to Kongsi. Sign up to start teaching and learning.
-          </p>
+            <p v-if="isSignup && inviteCode !== ''" class="small text-muted mb-3">
+              A friend invited you to Kongsi. Sign up to start teaching and learning.
+            </p>
 
-          <div class="mb-3">
-            <label for="email" class="form-label fw-semibold">Email</label>
-            <input id="email" v-model="email" type="email" class="form-control" required />
-          </div>
+            <div class="mb-3">
+              <label for="email" class="form-label fw-semibold">Email</label>
+              <input id="email" v-model="email" type="email" class="form-control" autocomplete="email" required />
+            </div>
 
-          <div class="mb-3">
-            <label for="password" class="form-label fw-semibold">Password</label>
-            <input id="password" v-model="password" type="password" class="form-control" required />
-          </div>
+            <div class="mb-3">
+              <label for="password" class="form-label fw-semibold">Password</label>
+              <input
+                id="password"
+                v-model="password"
+                type="password"
+                class="form-control"
+                :autocomplete="isSignup ? 'new-password' : 'current-password'"
+                required
+              />
+            </div>
 
-          <button type="submit" class="btn btn-brand w-100 mt-2">
-            {{ isSignup ? 'Sign up' : 'Log in' }}
-          </button>
-
-          <p v-if="message" class="small mt-3 mb-0" :class="isError ? 'text-danger' : 'text-success'">{{ message }}</p>
-
-          <p class="text-center small mt-3 mb-0">
-            {{ isSignup ? 'Already have an account?' : "Don't have an account?" }}
-            <button type="button" class="btn btn-link btn-sm p-0 link-brand" @click="switchMode">
-              {{ isSignup ? 'Log in' : 'Sign up' }}
+            <button type="submit" class="btn btn-brand w-100 mt-2">
+              {{ isSignup ? 'Sign up' : 'Log in' }}
             </button>
-          </p>
-        </form>
+
+            <p v-if="message" class="small mt-3 mb-0" :class="isError ? 'text-danger' : 'text-success'">{{ message }}</p>
+
+            <p class="text-center small mt-3 mb-0">
+              {{ isSignup ? 'Already have an account?' : "Don't have an account?" }}
+              <button ref="switchButton" type="button" class="btn btn-link btn-sm p-0 link-brand" @click="switchMode">
+                {{ isSignup ? 'Log in' : 'Sign up' }}
+              </button>
+            </p>
+          </form>
+        </Transition>
       </div>
     </div>
   </div>
@@ -140,6 +164,10 @@ async function goToStartPage() {
   background: var(--k-surface-alt);
   border-bottom: 1px solid var(--k-border);
   color: var(--k-accent);
+}
+
+.home-link {
+  color: inherit;
 }
 
 .image-panel {
@@ -160,6 +188,53 @@ async function goToStartPage() {
 
 .form-side {
   background: var(--k-bg);
+  perspective: 1200px; /* gives the card flip its depth */
+}
+
+/* ---------- Switching between Login and Sign up ----------
+   The card turns away to its edge (ease-in), the content swaps while it is edge-on, then the
+   new side turns towards you (ease-out). About 0.3s in total: quick, but easy to follow. */
+.flip-enter-active {
+  transition: transform 0.16s ease-out, opacity 0.16s ease-out;
+}
+
+.flip-leave-active {
+  transition: transform 0.14s ease-in, opacity 0.14s ease-in;
+}
+
+.flip-leave-to {
+  transform: rotateY(90deg);
+  opacity: 0.6;
+}
+
+.flip-enter-from {
+  transform: rotateY(-90deg);
+  opacity: 0.6;
+}
+
+/* the two photos sit on top of each other while one fades into the other */
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.3s ease;
+}
+
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+}
+
+/* people who asked for less motion get a short fade instead of the flip */
+@media (prefers-reduced-motion: reduce) {
+  .flip-enter-active,
+  .flip-leave-active {
+    transition: opacity 0.12s linear;
+  }
+
+  .flip-enter-from,
+  .flip-leave-to {
+    transform: none;
+    opacity: 0;
+  }
 }
 
 .card {

@@ -6,11 +6,22 @@ import { findProfileSkill, findMediaProblem, cleanMedia, allMediaPaths, findTitl
 import { slotMoment } from '../models/bookingRules.js'
 import { publicOffer, publicBooking } from '../models/publicView.js'
 import { bookSlot } from '../models/bookings.js'
-import { deleteDiscussion } from '../models/discussions.js'
+import { deleteDiscussion, isValidId } from '../models/discussions.js'
 import { regionList, regionCentres } from '../config/skills.js'
 import { MAX_STAGES, calcCreditCost } from '../config/credits.js'
 
 const router = express.Router()
+
+// A made-up id such as "a/b" would make Firestore throw (it reads it as a path), so ids like
+// that get a plain 404 here, before any route runs (the same check as routes/admins.js).
+router.param('id', (req, res, next, value) => {
+  if (!isValidId(value)) return res.status(404).json({ error: 'Not found.' })
+  next()
+})
+router.param('slotId', (req, res, next, value) => {
+  if (!isValidId(value)) return res.status(404).json({ error: 'Not found.' })
+  next()
+})
 
 const maxSlots = 20
 
@@ -46,8 +57,12 @@ function isRealSlot(slot) {
   if (typeof slot !== 'object' || slot === null) return false
   if (typeof slot.date !== 'string' || !isDateText(slot.date)) return false
   if (typeof slot.time !== 'string' || !isTimeText(slot.time)) return false
-  // catches dates that do not exist, like 2026-02-31 or month 13
-  return !Number.isNaN(slotMoment(slot.date, slot.time).getTime())
+  const startsAt = slotMoment(slot.date, slot.time)
+  if (Number.isNaN(startsAt.getTime())) return false // e.g. month 13
+  // JavaScript quietly rolls a date that does not exist (2026-02-31) over to the next month,
+  // so the date must come back unchanged when read in Singapore time
+  const singaporeDay = new Date(startsAt.getTime() + 8 * 60 * 60 * 1000).toISOString().slice(0, 10)
+  return singaporeDay === slot.date
 }
 
 // Returns an error message, or '' if everything is fine.

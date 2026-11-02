@@ -1,4 +1,5 @@
 import axios from 'axios'
+import { signOut } from 'firebase/auth'
 import { auth } from '../firebase'
 
 const API = import.meta.env.VITE_API_URL
@@ -10,6 +11,19 @@ export function errorText(err) {
   }
   return err.message
 }
+
+// One place for "this login is no longer good": the server answers 401 when the token is
+// expired or revoked, and 403 with code 'banned' when an admin has suspended the account.
+// Log out (the stores are cleared by the listener in main.js) and go back to the login page.
+axios.interceptors.response.use(null, async (err) => {
+  const status = err.response ? err.response.status : 0
+  const banned = status === 403 && err.response.data && err.response.data.code === 'banned'
+  if ((status === 401 || banned) && auth.currentUser) {
+    await signOut(auth)
+    if (window.location.pathname !== '/login') window.location.assign('/login')
+  }
+  return Promise.reject(err)
+})
 
 async function authConfig() {
   // After a page refresh Firebase needs a moment to restore the login,
@@ -82,13 +96,13 @@ export async function createOffer(offer) {
 
 // -> { offer, removedPaths }
 export async function updateOffer(id, offer) {
-  const response = await axios.put(API + '/offers/' + id, offer, await authConfig())
+  const response = await axios.put(API + '/offers/' + encodeURIComponent(id), offer, await authConfig())
   return response.data
 }
 
 // -> { ok, removedPaths }
 export async function deleteOffer(id) {
-  const response = await axios.delete(API + '/offers/' + id, await authConfig())
+  const response = await axios.delete(API + '/offers/' + encodeURIComponent(id), await authConfig())
   return response.data
 }
 
@@ -104,12 +118,12 @@ export async function createGoal(goal) {
 }
 
 export async function updateGoal(id, goal) {
-  const response = await axios.put(API + '/learn-goals/' + id, goal, await authConfig())
+  const response = await axios.put(API + '/learn-goals/' + encodeURIComponent(id), goal, await authConfig())
   return response.data
 }
 
 export async function deleteGoal(id) {
-  const response = await axios.delete(API + '/learn-goals/' + id, await authConfig())
+  const response = await axios.delete(API + '/learn-goals/' + encodeURIComponent(id), await authConfig())
   return response.data
 }
 
@@ -117,7 +131,7 @@ export async function deleteGoal(id) {
 // Book one start time of a course. -> { booking, offer }
 // (the slot id looks like "2026-11-08-14:00", so it is encoded to be safe in the address)
 export async function bookSlot(offerId, slotId) {
-  const url = API + '/offers/' + offerId + '/slots/' + encodeURIComponent(slotId) + '/book'
+  const url = API + '/offers/' + encodeURIComponent(offerId) + '/slots/' + encodeURIComponent(slotId) + '/book'
   const response = await axios.post(url, {}, await authConfig())
   return response.data
 }
@@ -148,19 +162,19 @@ export async function approveBookingStage(id, stageIndex) {
 
 // -> { booking, offer }
 export async function cancelBooking(id) {
-  const response = await axios.post(API + '/bookings/' + id + '/cancel', {}, await authConfig())
+  const response = await axios.post(API + '/bookings/' + encodeURIComponent(id) + '/cancel', {}, await authConfig())
   return response.data
 }
 
 // -> { booking }
 export async function confirmBooking(id) {
-  const response = await axios.post(API + '/bookings/' + id + '/confirm', {}, await authConfig())
+  const response = await axios.post(API + '/bookings/' + encodeURIComponent(id) + '/confirm', {}, await authConfig())
   return response.data
 }
 
 // -> { booking }
 export async function reportBooking(id, reason) {
-  const response = await axios.post(API + '/bookings/' + id + '/report', { reason: reason }, await authConfig())
+  const response = await axios.post(API + '/bookings/' + encodeURIComponent(id) + '/report', { reason: reason }, await authConfig())
   return response.data
 }
 
@@ -221,7 +235,7 @@ export async function getDisputes() {
 
 // decision is 'pay-teacher' or 'refund-student' -> { report }
 export async function settleDispute(bookingId, decision, note) {
-  const response = await axios.post(API + '/admins/disputes/' + bookingId + '/settle', { decision: decision, note: note }, await authConfig())
+  const response = await axios.post(API + '/admins/disputes/' + encodeURIComponent(bookingId) + '/settle', { decision: decision, note: note }, await authConfig())
   return response.data
 }
 
@@ -229,19 +243,19 @@ export async function settleDispute(bookingId, decision, note) {
 // The messages after number "after" (0 = the whole chat) -> { messages, open }
 // open = can new messages still be written? (false once the booking is finished or cancelled)
 export async function getMessages(bookingId, after) {
-  const response = await axios.get(API + '/bookings/' + bookingId + '/messages?after=' + after, await authConfig())
+  const response = await axios.get(API + '/bookings/' + encodeURIComponent(bookingId) + '/messages?after=' + after, await authConfig())
   return response.data
 }
 
 // -> { message }
 export async function sendChatMessage(bookingId, text) {
-  const response = await axios.post(API + '/bookings/' + bookingId + '/messages', { text: text }, await authConfig())
+  const response = await axios.post(API + '/bookings/' + encodeURIComponent(bookingId) + '/messages', { text: text }, await authConfig())
   return response.data
 }
 
 // Admin only: the chat of a booking that was reported -> { messages }
 export async function getDisputeMessages(bookingId) {
-  const response = await axios.get(API + '/admins/disputes/' + bookingId + '/messages', await authConfig())
+  const response = await axios.get(API + '/admins/disputes/' + encodeURIComponent(bookingId) + '/messages', await authConfig())
   return response.data
 }
 

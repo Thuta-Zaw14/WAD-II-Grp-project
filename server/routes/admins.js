@@ -180,8 +180,14 @@ router.get('/users', verifyToken, verifyAdmin, async (req, res) => {
       const against = reportOf(booking).againstUid
       reportCounts[against] = (reportCounts[against] || 0) + 1
     }
+    // A message counts once however many people reported it, so a crowd of (perhaps fake)
+    // accounts reporting the same post cannot push someone's number up.
+    const countedMessages = new Set()
     for (const report of messageReports) {
       if (!countsAgainstAuthor(report)) continue
+      const messageKey = report.kind + '_' + report.containerId + '_' + report.n
+      if (countedMessages.has(messageKey)) continue
+      countedMessages.add(messageKey)
       reportCounts[report.authorUid] = (reportCounts[report.authorUid] || 0) + 1
     }
 

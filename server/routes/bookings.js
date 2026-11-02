@@ -7,10 +7,18 @@ import {
 } from '../models/bookings.js'
 import { publicBooking, publicOffer, publicMessage, publicChatInfo } from '../models/publicView.js'
 import { sendMessage, readMessages, chatIsOpen, MAX_MESSAGE_LENGTH } from '../models/chat.js'
+import { isValidId } from '../models/discussions.js'
 
 // Making a booking is POST /api/offers/:id/slots/:slotId/book (in routes/offers.js).
 // Everything after that is here. The rules are in models/bookings.js.
 const router = express.Router()
+
+// A made-up id such as "a/b" would make Firestore throw (it reads it as a path), so ids like
+// that get a plain 404 here, before any route runs (the same check as routes/admins.js).
+router.param('id', (req, res, next, value) => {
+  if (!isValidId(value)) return res.status(404).json({ error: 'Not found.' })
+  next()
+})
 
 const maxReasonLength = 300
 

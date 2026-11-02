@@ -18,7 +18,7 @@ const bookingsStore = useBookingsStore()
 
 // "paths" are the addresses where the link is highlighted, e.g. a chat belongs to My classes
 const links = [
-  { label: 'Courses', to: '/home', paths: ['/home', '/discussion'] },
+  { label: 'Courses', to: '/courses', paths: ['/courses', '/discussion'] },
   { label: 'MyClasses', to: '/classes', paths: ['/classes', '/sessions', '/chat'] },
   { label: 'Insights', to: '/insights', paths: ['/insights'] },
   { label: 'Report', to: '/reports', paths: ['/reports'] },
@@ -116,7 +116,7 @@ async function logout() {
   profileStore.reset()
   offersStore.reset()
   bookingsStore.reset()
-  router.push('/login')
+  router.push('/')
 }
 </script>
 

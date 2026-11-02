@@ -1,32 +1,32 @@
 <script setup>
-import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { onAuthStateChanged } from 'firebase/auth'
-import L from 'leaflet'
-import 'leaflet/dist/leaflet.css'
 import { auth } from '../firebase'
-import { useOffersStore } from '../stores/offers'
 import { useProfileStore } from '../stores/profile'
 import { useBookingsStore } from '../stores/bookings'
-import SkillSearch from '../components/SkillSearch.vue'
 import NavBar from '../components/NavBar.vue'
-import UserAvatar from '../components/UserAvatar.vue'
-import LoadingText from '../components/LoadingText.vue'
-import EmptyState from '../components/EmptyState.vue'
-import heroImg from '../assets/login.jpg'
-import { matches } from '../searchUtils'
 
+// The page you land on after logging in: a personal welcome, a short getting-started
+// tutorial, and shortcuts to the main parts of the app.
 const router = useRouter()
-const offersStore = useOffersStore()
 const profileStore = useProfileStore()
 const bookingsStore = useBookingsStore()
-const user = ref(null)
+const uid = ref('')
+
 const credits = computed(() => profileStore.credits)
 
-// "Bob" from "Bob Lim", for the greeting ('' until the profile has a name)
+// "Bob" from "Bob Lim" ('' until the profile has a name)
 const firstName = computed(() => {
   const name = profileStore.profile ? profileStore.profile.name || '' : ''
   return name.trim().split(' ')[0]
+})
+
+// "Good morning" / "Good afternoon" / "Good evening" by the clock on this device
+const greeting = computed(() => {
+  const hour = new Date().getHours()
+  if (hour < 12) return 'Good morning'
+  if (hour < 18) return 'Good afternoon'
+  return 'Good evening'
 })
 
 // warnings an admin gave me (shown at the top of the page)
@@ -35,278 +35,151 @@ const warnings = computed(() => {
   return Array.isArray(list) ? list : []
 })
 
-// ---------- Login ----------
-function handleAuthChange(firebaseUser) {
-  if (firebaseUser) {
-    user.value = firebaseUser
-    profileStore.fetchProfile()
+// bookings that are not over yet
+const activeLearning = computed(() =>
+  bookingsStore.learning.filter((b) => b.status !== 'finished' && b.status !== 'cancelled')
+)
+const activeTeaching = computed(() =>
+  bookingsStore.teaching.filter((b) => b.status !== 'finished' && b.status !== 'cancelled')
+)
 
-    // only fetch if the store does not have the offers yet
-    if (offersStore.offers.length === 0) {
-      offersStore.fetchOffers()
-    }
-  } else {
-    profileStore.reset()
-    offersStore.reset() // each offer says which slots are "mine", so the next person must not see these
-    bookingsStore.reset()
-    router.push('/login')
-  }
-}
-
-const stopListening = onAuthStateChanged(auth, handleAuthChange)
-
-function goToSessions() {
-  router.push('/sessions')
-}
-
-// the public questions & discussion of a course (anyone can read and write there)
-function openDiscussion(skill) {
-  router.push('/discussion/' + skill.id)
-}
-
-// ---------- Skills (loaded from Firestore through the offers store) ----------
-const skills = computed(() => offersStore.offers)
-
-// ---------- Filters ----------
-const search = ref('')
-const categories = ['All', 'Sports', 'Creative', 'Music', 'Tech']
-const regions = ['All', 'Central', 'West', 'East', 'North']
-const selectedCategory = ref('All')
-const selectedRegion = ref('All')
-
-// Pin colour for each genre
-const categoryColors = {
-  Sports: '#d9822b',
-  Creative: '#8e5ea2',
-  Music: '#3b8ea5',
-  Tech: '#4a7c59',
-}
-
-// ---------- Near me ----------
-const userPos = ref(null) // { lat, lng } once we know where you are
-const userRegion = ref('')
-const locationError = ref('')
-let youMarker = null
-
-// Work out the region from coordinates (rough cut-offs, not official borders)
-function getRegion(lat, lng) {
-  if (lat > 1.4) return 'North'
-  if (lng < 103.75) return 'West'
-  if (lng > 103.9) return 'East'
-  return 'Central'
-}
-
-// Straight-line distance in km. 1 degree is about 111 km (close enough for Singapore)
-function distanceKm(from, to) {
-  const dLat = to.lat - from.lat
-  const dLng = to.lng - from.lng
-  return Math.sqrt(dLat * dLat + dLng * dLng) * 111
-}
-
-function findMe() {
-  locationError.value = ''
-  navigator.geolocation.getCurrentPosition(
-    (pos) => {
-      const lat = pos.coords.latitude
-      const lng = pos.coords.longitude
-      userPos.value = { lat, lng }
-      userRegion.value = getRegion(lat, lng)
-
-      if (youMarker) youMarker.remove()
-      youMarker = L.circleMarker([lat, lng], { radius: 8, color: 'blue' }).addTo(map)
-    },
-    () => {
-      locationError.value = 'Could not get your location. Allow location access in your browser.'
-    }
-  )
-}
-
-function clearLocation() {
-  userPos.value = null
-  userRegion.value = ''
-  youMarker.remove()
-}
-
-// ---------- The list (also used for the map pins) ----------
-const filteredSkills = computed(() => {
-  const results = []
-
-  for (const item of skills.value) {
-    const textMatches = matches(search.value, [item.title, item.skill, item.teacherName, item.category])
-    const categoryMatches =
-      selectedCategory.value === 'All' || item.category === selectedCategory.value
-    const regionMatches = selectedRegion.value === 'All' || item.region === selectedRegion.value
-
-    if (textMatches && categoryMatches && regionMatches) {
-      // online classes have no pin, so they have no distance
-      const hasPin = typeof item.lat === 'number' && typeof item.lng === 'number'
-      const distance = userPos.value && hasPin ? distanceKm(userPos.value, item) : null
-      results.push({ ...item, distance })
-    }
-  }
-
-  // Closest first, once we know where you are
-  if (userPos.value) {
-    results.sort((a, b) => {
-      if (a.distance === null) return 1 // online classes go last
-      if (b.distance === null) return -1
-      return a.distance - b.distance
-    })
-  }
-
-  return results
+onMounted(async () => {
+  await auth.authStateReady() // the router guard already made sure someone is logged in
+  if (!auth.currentUser) return
+  uid.value = auth.currentUser.uid
+  loadTutorialState()
+  profileStore.fetchProfile()
+  profileStore.fetchMyCourses()
+  bookingsStore.fetchBookings()
 })
 
-// ---------- The map ----------
-const mapEl = ref(null)
-let map = null
-let pinLayer = null
+// ---------- Tutorial ----------
+// Each step is ticked off by itself once the app sees you have done it (e.g. you booked
+// something). "Browse courses" cannot be seen that way, so it is ticked when you press its button.
+// What you clicked and whether the tutorial is hidden is remembered in this browser, per account.
+const visited = ref([]) // keys of steps whose button was pressed
+const hidden = ref(false)
+const current = ref(0) // index of the step shown in the panel
 
-function drawPins() {
-  if (!pinLayer) return // the map is not ready yet
-  pinLayer.clearLayers()
+function storageKey() {
+  return 'kongsi-tutorial-' + uid.value
+}
 
-  for (const s of filteredSkills.value) {
-    if (typeof s.lat !== 'number' || typeof s.lng !== 'number') continue // online class: no pin
-    const pin = L.circleMarker([s.lat, s.lng], {
-      radius: 10,
-      color: 'white',
-      fillColor: categoryColors[s.category],
-      fillOpacity: 1,
-    })
-    pin.bindTooltip(s.title)
-    pin.on('click', () => openBooking(s)) // clicking a pin opens the booking popup
-    pin.addTo(pinLayer)
+function loadTutorialState() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(storageKey()) || '{}')
+    visited.value = Array.isArray(saved.visited) ? saved.visited : []
+    hidden.value = saved.hidden === true
+  } catch {
+    // storage blocked or broken: just start the tutorial fresh
   }
 }
 
-// Redraw the pins whenever the list changes
-watch(filteredSkills, drawPins)
+function saveTutorialState() {
+  try {
+    localStorage.setItem(storageKey(), JSON.stringify({ visited: visited.value, hidden: hidden.value }))
+  } catch {
+    // storage blocked: the tutorial still works, it just forgets on reload
+  }
+}
 
-onMounted(() => {
-  map = L.map(mapEl.value).setView([1.3521, 103.8198], 11) // middle of Singapore
-  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    attribution: '&copy; OpenStreetMap contributors',
-  }).addTo(map)
-  pinLayer = L.layerGroup().addTo(map)
-  drawPins()
+const hasProfile = computed(() => {
+  const p = profileStore.profile
+  if (!p) return false
+  const skills = (p.skillsTeach || []).length + (p.skillsLearn || []).length
+  return (p.name || '').trim() !== '' && skills > 0
 })
 
-onUnmounted(() => {
-  stopListening()
-  map.remove()
-})
+const steps = computed(() => [
+  {
+    key: 'profile',
+    icon: '🙋',
+    title: 'Set up your profile',
+    text: 'Add your name and the skills you can teach or want to learn. Other members see this when they look at your courses.',
+    tip: 'A short bio helps learners feel comfortable booking with you.',
+    action: 'Edit my profile',
+    to: '/profile',
+    done: hasProfile.value,
+  },
+  {
+    key: 'browse',
+    icon: '🗺️',
+    title: 'Browse courses',
+    text: 'Search by name, filter by genre and region, or sort by distance to find courses near you. Online classes are listed too.',
+    tip: 'Pins on the map are coloured by genre. Click one to see its start times.',
+    action: 'Browse courses',
+    to: '/courses',
+    done: visited.value.includes('browse') || bookingsStore.learning.length > 0,
+  },
+  {
+    key: 'book',
+    icon: '📅',
+    title: 'Book your first session',
+    text: 'Pick a start time and confirm. The credits are held, not spent, until you and your coach both mark the course finished.',
+    tip: 'You can cancel for a full refund until 24 hours before the course starts.',
+    action: 'Find something to book',
+    to: '/courses',
+    done: bookingsStore.learning.length > 0,
+  },
+  {
+    key: 'teach',
+    icon: '🎓',
+    title: 'Teach a skill',
+    text: 'Create a course with your available start times. Every finished course pays you its credits, which you can spend on learning.',
+    tip: 'Running low on credits? Teaching is the way to earn more.',
+    action: 'Create a course',
+    to: '/teach/new',
+    done: profileStore.myOffers.length > 0,
+  },
+  {
+    key: 'finish',
+    icon: '🏁',
+    title: 'Track progress and finish',
+    text: 'Chat with your coach or learner in My sessions, write a short reflection after each stage, and mark the course finished when you are done.',
+    tip: 'Your Insights page shows how much you have learned and taught over time.',
+    action: 'Go to My sessions',
+    to: '/sessions',
+    done: bookingsStore.bookings.some((b) => b.status === 'finished'),
+  },
+])
 
-// ---------- Booking popup ----------
-// Booking has two steps: click a start time to SELECT it, then press "Confirm booking".
-// Nothing is saved until the second step.
-const selectedId = ref(null) // id of the course in the popup (null = popup closed)
-const chosenSlotId = ref('') // the start time that is selected but not confirmed yet
-const bookedMessage = ref('') // shown after a booking worked
+const doneCount = computed(() => steps.value.filter((s) => s.done).length)
+const allDone = computed(() => doneCount.value === steps.value.length)
+const progress = computed(() => Math.round((doneCount.value / steps.value.length) * 100))
+const step = computed(() => steps.value[current.value])
 
-// Looked up from the store each time (not copied), so the seat counts update by themselves
-const selectedSkill = computed(() => {
-  for (const s of skills.value) {
-    if (s.id === selectedId.value) return s
+function goToStep(s) {
+  if (!visited.value.includes(s.key)) {
+    visited.value = [...visited.value, s.key]
+    saveTutorialState()
   }
-  return null
-})
-
-const chosenSlot = computed(() => {
-  if (!selectedSkill.value) return null
-  for (const slot of selectedSkill.value.slots) {
-    if (slot.id === chosenSlotId.value) return slot
-  }
-  return null
-})
-
-// is this my own course? (the server also refuses it)
-function isMine(skill) {
-  return user.value !== null && skill.teacherUid === user.value.uid
+  router.push(s.to)
 }
 
-// have I booked one of this course's start times?
-function hasBooked(skill) {
-  for (const slot of skill.slots) {
-    if (slot.mine) return true
-  }
-  return false
+// open the first step that is not done yet
+function jumpToNext() {
+  const index = steps.value.findIndex((s) => !s.done)
+  current.value = index === -1 ? 0 : index
 }
 
-function openBooking(skill) {
-  if (isMine(skill)) return
-  selectedId.value = skill.id
-  chosenSlotId.value = ''
-  bookedMessage.value = ''
-  bookingsStore.actionError = ''
+function hideTutorial() {
+  hidden.value = true
+  saveTutorialState()
 }
 
-function closeBooking() {
-  selectedId.value = null
+function showTutorial() {
+  hidden.value = false
+  saveTutorialState()
+  jumpToNext()
 }
 
-// Step 1: select a start time
-function chooseSlot(slot) {
-  if (slot.booked || slot.past || slot.mine || hasBooked(selectedSkill.value)) return
-  chosenSlotId.value = slot.id
-  bookingsStore.actionError = ''
-}
-
-// how a start time button looks
-function slotClass(slot) {
-  if (slot.mine) return 'btn-success'
-  if (slot.id === chosenSlotId.value) return 'btn-accent'
-  if (slot.booked || slot.past) return 'btn-outline-secondary'
-  return 'btn-brand'
-}
-
-// the hover text that explains why a start time cannot be picked
-function slotNote(slot) {
-  if (slot.mine) return 'You booked this start time'
-  if (slot.past) return 'This start time has already passed'
-  if (slot.booked) return 'This start time is full'
-  return ''
-}
-
-// Step 2: confirm
-async function confirmBooking() {
-  if (!chosenSlot.value) return
-  const ok = await bookingsStore.book(selectedSkill.value.id, chosenSlot.value.id)
-  if (ok) {
-    chosenSlotId.value = ''
-    bookedMessage.value = 'Booked! ' + selectedSkill.value.creditCost + ' credit(s) are held until the course is finished.'
-  }
-}
-
-// "Sat, 8 Nov, 14:00" in Singapore time
-function formatTime(iso) {
-  return new Date(iso).toLocaleString('en-SG', {
-    timeZone: 'Asia/Singapore',
-    weekday: 'short',
-    day: 'numeric',
-    month: 'short',
-    hour: '2-digit',
-    minute: '2-digit',
-  })
-}
-
-// Group the slots by date, so each day gets one row of times
-const slotsByDate = computed(() => {
-  const groups = {}
-  if (!selectedSkill.value) return groups
-
-  for (const slot of selectedSkill.value.slots) {
-    if (!groups[slot.date]) groups[slot.date] = []
-    groups[slot.date].push(slot)
-  }
-  return groups
-})
-
-function resetFilters() {
-  selectedCategory.value = 'All'
-  selectedRegion.value = 'All'
-  search.value = ''
-}
+// ---------- Shortcuts ----------
+const shortcuts = [
+  { icon: '🔍', title: 'Browse courses', text: 'Find something new to learn near you.', to: '/courses' },
+  { icon: '📚', title: 'My sessions', text: 'Chats, progress and reflections.', to: '/sessions' },
+  { icon: '📈', title: 'Insights', text: 'Your learning and teaching over time.', to: '/insights' },
+  { icon: '✏️', title: 'Teach a skill', text: 'Share what you know and earn credits.', to: '/teach/new' },
+]
 </script>
 
 <template>
@@ -323,323 +196,310 @@ function resetFilters() {
       </ul>
     </div>
 
-    <!-- Welcome box, with one main button. The photo is only shown on wider screens. -->
-    <section class="hero mb-4">
-      <div class="hero-text">
-        <p class="eyebrow mb-2">Kongsi skill exchange</p>
-        <h1 class="mb-2">Welcome back{{ firstName ? ', ' + firstName : '' }}</h1>
-        <p class="mb-3">Teach a skill, earn credits, and spend them learning something new.</p>
-        <div class="d-flex align-items-center flex-wrap gap-3">
-          <button class="btn btn-brand px-4" @click="router.push('/teach/new')">Teach a skill</button>
-          <span class="credit-pill">You have {{ credits }} time credit{{ credits === 1 ? '' : 's' }}</span>
+    <!-- Personal welcome -->
+    <section class="welcome mb-4">
+      <p class="eyebrow mb-2">{{ greeting }}</p>
+      <h1 class="mb-2">Welcome{{ firstName ? ', ' + firstName : '' }}! 👋</h1>
+      <p class="mb-3 text-muted">
+        <template v-if="allDone">You're all set. Here's what's happening on your Kongsi today.</template>
+        <template v-else>New here? The short tutorial below walks you through the basics.</template>
+      </p>
+
+      <div class="row g-2 stats">
+        <div class="col-4">
+          <div class="stat">
+            <span class="stat-value">{{ credits }}</span>
+            <span class="stat-label">time credit{{ credits === 1 ? '' : 's' }}</span>
+          </div>
+        </div>
+        <div class="col-4">
+          <RouterLink to="/sessions" class="stat stat-link">
+            <span class="stat-value">{{ activeLearning.length }}</span>
+            <span class="stat-label">course{{ activeLearning.length === 1 ? '' : 's' }} learning</span>
+          </RouterLink>
+        </div>
+        <div class="col-4">
+          <RouterLink to="/sessions" class="stat stat-link">
+            <span class="stat-value">{{ activeTeaching.length }}</span>
+            <span class="stat-label">learner{{ activeTeaching.length === 1 ? '' : 's' }} to teach</span>
+          </RouterLink>
         </div>
       </div>
-      <img :src="heroImg" alt="" class="hero-photo d-none d-md-block" />
     </section>
 
-    <!-- Search and filters -->
-    <div class="k-card p-3 mb-4">
-      <SkillSearch v-model="search" :skills="skills" />
-
-      <div class="d-flex align-items-center flex-wrap gap-2 mb-2">
-        <span class="small text-muted filter-label">Genre</span>
-        <button
-          v-for="c in categories"
-          :key="c"
-          type="button"
-          class="filter"
-          :class="{ active: selectedCategory === c }"
-          @click="selectedCategory = c"
-        >
-          <span v-if="c !== 'All'" class="dot" :style="{ background: categoryColors[c] }"></span>{{ c }}
-        </button>
-      </div>
-
-      <div class="d-flex align-items-center flex-wrap gap-2 mb-2">
-        <span class="small text-muted filter-label">Region</span>
-        <button
-          v-for="r in regions"
-          :key="r"
-          type="button"
-          class="filter"
-          :class="{ active: selectedRegion === r }"
-          @click="selectedRegion = r"
-        >{{ r }}</button>
-      </div>
-
-      <p class="small mb-0">
-        <a v-if="!userPos" href="#" @click.prevent="findMe">Sort by distance from me</a>
-        <template v-else>
-          <span class="text-muted">You're in the {{ userRegion }} region. Closest first.</span>
-          <a href="#" class="ms-2" @click.prevent="clearLocation">Clear</a>
-        </template>
-        <a
-          v-if="selectedCategory !== 'All' || selectedRegion !== 'All'"
-          href="#"
-          class="ms-3"
-          @click.prevent="resetFilters"
-        >Reset filters</a>
-        <span v-if="locationError" class="ms-2 text-danger">{{ locationError }}</span>
-      </p>
-    </div>
-
-    <!-- On a phone the map shows first, then the list. On desktop they sit side by side. -->
-    <div class="row g-3">
-      <div class="col-lg-7 order-lg-2">
-        <div ref="mapEl" class="map-box"></div>
-      </div>
-
-      <div class="col-lg-5 order-lg-1">
-        <div class="list-pane">
-          <div
-            v-for="s in filteredSkills"
-            :key="s.id"
-            class="card genre-card k-lift mb-3"
-            :class="'cat-' + s.category"
-          >
-            <div class="card-body">
-              <div class="d-flex justify-content-between align-items-center mb-2">
-                <span class="badge rounded-pill text-bg-light">
-                  <span class="dot" :style="{ background: categoryColors[s.category] }"></span>{{ s.category }}
-                </span>
-                <span v-if="hasBooked(s)" class="badge rounded-pill text-bg-success">Booked</span>
-                <small v-else-if="s.distance !== null" class="text-muted">{{ s.distance.toFixed(1) }} km away</small>
-              </div>
-
-              <h2 class="h5 mb-2">{{ s.title }}</h2>
-              <div class="d-flex align-items-center gap-2 mb-2">
-                <UserAvatar :name="s.teacherName" />
-                <span class="text-muted">Taught by {{ s.teacherName }}</span>
-              </div>
-              <p v-if="s.mode === 'online'" class="text-muted small mb-2">💻 Online class</p>
-              <p v-else class="text-muted small mb-2">📍 Meets at {{ s.place }} ({{ s.region }})</p>
-              <p class="mb-3">
-                <span class="credit-pill">{{ s.creditCost }} credit{{ s.creditCost === 1 ? '' : 's' }} to join</span>
-              </p>
-
-              <button v-if="isMine(s)" class="btn btn-outline-secondary w-100" disabled>Your course</button>
-              <button v-else class="btn btn-brand w-100" @click="openBooking(s)">
-                {{ hasBooked(s) ? 'View booking' : 'Book a session' }}
-              </button>
-              <button class="btn btn-sm btn-outline-secondary w-100 mt-2" @click="openDiscussion(s)">
-                Questions &amp; discussion
-              </button>
-            </div>
-          </div>
-
-          <LoadingText v-if="offersStore.loading" text="Loading skills..." />
-          <p v-else-if="offersStore.error" class="text-danger">{{ offersStore.error }}</p>
-          <EmptyState
-            v-else-if="skills.length === 0"
-            icon="🌱"
-            title="No courses yet"
-            text="Be the first to teach something and earn credits."
-          >
-            <button class="btn btn-brand btn-sm" @click="router.push('/teach/new')">Teach a skill</button>
-          </EmptyState>
-          <EmptyState
-            v-else-if="filteredSkills.length === 0"
-            icon="🔍"
-            title="No skills match your filters"
-            text="Try a different genre or region, or clear the search."
-          >
-            <button class="btn btn-outline-secondary btn-sm" @click="resetFilters">Clear search and filters</button>
-          </EmptyState>
+    <!-- Getting-started tutorial -->
+    <section v-if="!hidden" class="k-card tutorial p-3 p-md-4 mb-4" aria-labelledby="tutorial-title">
+      <div class="d-flex align-items-start justify-content-between gap-3 mb-3">
+        <div>
+          <h2 id="tutorial-title" class="h4 mb-1">Getting started with Kongsi</h2>
+          <p class="small text-muted mb-0">{{ doneCount }} of {{ steps.length }} steps done</p>
         </div>
+        <button type="button" class="btn btn-sm btn-outline-secondary" @click="hideTutorial">Hide tutorial</button>
       </div>
-    </div>
-  </div>
 
-  <!-- Booking popup -->
-  <div
-    v-if="selectedSkill"
-    class="modal d-block"
-    style="background: rgba(0, 0, 0, 0.5)"
-    @click.self="closeBooking"
-  >
-    <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable">
-      <div class="modal-content">
-        <div class="modal-header modal-banner">
-          <div>
-            <h2 class="h5 mb-0">{{ selectedSkill.title }}</h2>
-            <small>Coach: {{ selectedSkill.teacherName }}</small>
-          </div>
-          <button class="btn-close" @click="closeBooking"></button>
-        </div>
+      <div
+        class="progress mb-4"
+        role="progressbar"
+        :aria-valuenow="progress"
+        aria-valuemin="0"
+        aria-valuemax="100"
+        aria-label="Tutorial progress"
+      >
+        <div class="progress-bar" :style="{ width: progress + '%' }"></div>
+      </div>
 
-        <div class="modal-body">
-          <!-- after a booking worked -->
-          <div v-if="bookedMessage">
-            <div class="alert alert-success">{{ bookedMessage }}</div>
-            <p class="small text-muted">
-              You will find it under My sessions, where you can cancel it while that is still allowed.
-            </p>
-            <button class="btn btn-brand me-2" @click="goToSessions">Go to My sessions</button>
-            <button class="btn btn-outline-secondary" @click="closeBooking">Close</button>
-          </div>
+      <div v-if="allDone" class="alert alert-success d-flex align-items-center gap-2">
+        <span aria-hidden="true">🎉</span>
+        <span>You've completed every step. You're a true Kongsi member now!</span>
+      </div>
 
-          <template v-else>
-            <p v-if="hasBooked(selectedSkill)" class="alert alert-info small">
-              You have already booked this course. See My sessions.
-            </p>
-            <p v-else class="text-muted">Pick a time, then confirm your booking.</p>
-
-            <p class="small text-muted">
-              {{ selectedSkill.durationWeeks }} week{{ selectedSkill.durationWeeks === 1 ? '' : 's' }},
-              {{ selectedSkill.lessonsPerWeek }} lesson{{ selectedSkill.lessonsPerWeek === 1 ? '' : 's' }} a week.
-              {{ selectedSkill.sessionDurationMinutes || 60 }} minutes per session.
-              One booking covers the whole course.
-            </p>
-
-            <!-- Step 1: select a start time -->
-            <div v-for="(daySlots, date) in slotsByDate" :key="date" class="mb-3">
-              <div class="fw-bold mb-2">{{ date }}</div>
-              <div class="d-flex flex-wrap gap-2">
-                <button
-                  v-for="slot in daySlots"
-                  :key="slot.id"
-                  class="btn btn-sm"
-                  :class="slotClass(slot)"
-                  :disabled="slot.booked || slot.past || slot.mine || hasBooked(selectedSkill)"
-                  :title="slotNote(slot)"
-                  @click="chooseSlot(slot)"
-                >
-                  {{ slot.time }}
-                  <small v-if="slot.mine">(yours)</small>
-                  <small v-else-if="slot.past">(started)</small>
-                  <small v-else-if="slot.booked">(full)</small>
-                  <small v-else>({{ slot.spotsLeft }} left)</small>
-                </button>
-              </div>
-            </div>
-
-            <p v-if="selectedSkill.slots.length === 0" class="text-muted">
-              This coach has no available times yet.
-            </p>
-
-            <!-- Step 2: confirm -->
-            <div v-if="chosenSlot" class="border rounded p-3 mt-3">
-              <p class="fw-semibold mb-1">{{ selectedSkill.title }}: starts {{ chosenSlot.date }} at {{ chosenSlot.time }}</p>
-              <p class="small mb-1">
-                Cost: <strong>{{ selectedSkill.creditCost }} credit{{ selectedSkill.creditCost === 1 ? '' : 's' }}</strong>
-                (you have {{ credits }}). The credit is held until you and the teacher both mark the course finished.
-              </p>
-              <p v-if="chosenSlot.cancellable" class="small text-muted mb-2">
-                You can cancel for a full refund until {{ formatTime(chosenSlot.cancelBefore) }}.
-              </p>
-              <p v-else class="small text-danger mb-2">
-                This starts in less than 24 hours, so once booked it cannot be cancelled.
-              </p>
-              <p v-if="credits < selectedSkill.creditCost" class="small text-danger mb-2">
-                You do not have enough credits. Teach a course to earn some.
-              </p>
-              <p v-if="bookingsStore.actionError" class="small text-danger mb-2">{{ bookingsStore.actionError }}</p>
-
+      <div class="row g-3">
+        <!-- The list of steps (a row that scrolls sideways on a phone) -->
+        <div class="col-md-4">
+          <ol class="step-list" role="tablist" aria-label="Tutorial steps">
+            <li v-for="(s, i) in steps" :key="s.key">
               <button
-                class="btn btn-brand me-2"
-                :disabled="bookingsStore.booking || credits < selectedSkill.creditCost"
-                @click="confirmBooking"
+                type="button"
+                role="tab"
+                class="step-tab"
+                :class="{ active: i === current, done: s.done }"
+                :aria-selected="i === current"
+                @click="current = i"
               >
-                {{ bookingsStore.booking ? 'Booking...' : 'Confirm booking' }}
+                <span class="check" aria-hidden="true">{{ s.done ? '✓' : i + 1 }}</span>
+                <span class="step-title">{{ s.title }}</span>
+                <span v-if="s.done" class="visually-hidden">(done)</span>
               </button>
-              <button class="btn btn-outline-secondary" @click="chosenSlotId = ''">Choose another time</button>
-            </div>
-
-            <p v-else-if="bookingsStore.actionError" class="small text-danger mt-2">{{ bookingsStore.actionError }}</p>
-          </template>
+            </li>
+          </ol>
         </div>
+
+        <!-- The step that is open -->
+        <div class="col-md-8">
+          <div class="step-panel h-100" role="tabpanel">
+            <div class="d-flex align-items-center gap-2 mb-2">
+              <span class="step-icon" aria-hidden="true">{{ step.icon }}</span>
+              <span class="eyebrow">Step {{ current + 1 }} of {{ steps.length }}</span>
+              <span v-if="step.done" class="badge rounded-pill text-bg-success ms-auto">Done</span>
+            </div>
+            <h3 class="h5 mb-2">{{ step.title }}</h3>
+            <p class="mb-3">{{ step.text }}</p>
+            <p class="tip small mb-3"><strong>Tip:</strong> {{ step.tip }}</p>
+
+            <div class="d-flex flex-wrap align-items-center gap-2">
+              <button type="button" class="btn btn-brand" @click="goToStep(step)">{{ step.action }}</button>
+              <div class="ms-auto d-flex gap-2">
+                <button
+                  type="button"
+                  class="btn btn-sm btn-outline-secondary"
+                  :disabled="current === 0"
+                  @click="current--"
+                >&larr; Back</button>
+                <button
+                  type="button"
+                  class="btn btn-sm btn-outline-secondary"
+                  :disabled="current === steps.length - 1"
+                  @click="current++"
+                >Next &rarr;</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <p v-else class="small mb-4">
+      <a href="#" @click.prevent="showTutorial">Show the getting-started tutorial again</a>
+    </p>
+
+    <!-- Shortcuts -->
+    <h2 class="h5 mb-3">Jump back in</h2>
+    <div class="row g-3">
+      <div v-for="s in shortcuts" :key="s.to" class="col-6 col-lg-3">
+        <RouterLink :to="s.to" class="k-card k-lift shortcut d-block h-100 p-3 text-decoration-none">
+          <div class="shortcut-icon mb-2" aria-hidden="true">{{ s.icon }}</div>
+          <div class="fw-semibold">{{ s.title }}</div>
+          <div class="small text-muted">{{ s.text }}</div>
+        </RouterLink>
       </div>
     </div>
   </div>
 </template>
 
 <style scoped>
-.hero {
-  position: relative;
-  overflow: hidden;
+.welcome {
   background: var(--k-surface-alt);
   border: 1px solid var(--k-border);
   border-radius: var(--k-radius);
-}
-
-.hero-text {
   padding: 2rem;
 }
 
-.hero h1 {
+.welcome h1 {
   font-size: 2rem;
   color: var(--k-accent);
 }
 
-/* The photo fills the right part of the box and fades into it on its left side.
-   (It is hidden on a phone, so the text gets the whole width there.) */
-@media (min-width: 768px) {
-  .hero-text {
-    padding-right: 42%;
-  }
+.stats {
+  max-width: 560px;
 }
 
-.hero-photo {
-  position: absolute;
-  top: 0;
-  right: 0;
-  width: 40%;
+.stat {
+  display: flex;
+  flex-direction: column;
   height: 100%;
-  object-fit: cover;
-  -webkit-mask-image: linear-gradient(to right, transparent, black 45%);
-  mask-image: linear-gradient(to right, transparent, black 45%);
-}
-
-.filter-label {
-  width: 52px;
-}
-
-/* the genre and region buttons */
-.filter {
-  padding: 4px 14px;
-  border: 1px solid var(--k-border);
-  border-radius: 999px;
+  padding: 10px 14px;
   background: var(--k-surface);
+  border: 1px solid var(--k-border);
+  border-radius: 12px;
   color: var(--k-text);
-  font-size: 13px;
-  font-weight: 600;
+  text-decoration: none;
 }
 
-.filter:hover {
+.stat-link:hover {
   border-color: var(--k-brand);
 }
 
-.filter.active {
-  background: var(--k-accent);
-  border-color: var(--k-accent);
-  color: var(--k-on-accent);
+.stat-value {
+  font-family: var(--k-font-heading);
+  font-size: 1.6rem;
+  font-weight: 700;
+  line-height: 1.1;
+  color: var(--k-accent);
 }
 
-/* Small coloured dot for each genre */
-.dot {
-  display: inline-block;
-  width: 8px;
+.stat-label {
+  font-size: 12px;
+  color: var(--k-muted);
+}
+
+.tutorial h2 {
+  color: var(--k-accent);
+}
+
+.progress {
   height: 8px;
-  border-radius: 50%;
-  margin-right: 5px;
+  background: var(--k-surface-alt);
 }
 
-.map-box {
-  height: 400px;
+.progress-bar {
+  background: var(--k-brand);
+  transition: width 0.4s ease;
+}
+
+.step-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.step-tab {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  background: none;
+  color: var(--k-text);
+  text-align: left;
+  font-weight: 500;
+}
+
+.step-tab:hover {
+  background: var(--k-surface-alt);
+}
+
+.step-tab.active {
+  background: var(--k-surface-alt);
+  border-color: var(--k-border);
+  font-weight: 600;
+}
+
+.check {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 2px solid var(--k-border);
+  background: var(--k-surface);
+  color: var(--k-muted);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.step-tab.active .check {
+  border-color: var(--k-brand);
+  color: var(--k-brand);
+}
+
+.step-tab.done .check {
+  border-color: #2f7d4a;
+  background: #2f7d4a;
+  color: #fff;
+}
+
+.step-tab.done .step-title {
+  color: var(--k-muted);
+}
+
+/* On a phone the steps sit in a row that scrolls sideways, showing only the numbers
+   and the title of the open step. */
+@media (max-width: 767.98px) {
+  .step-list {
+    flex-direction: row;
+    overflow-x: auto;
+  }
+
+  .step-tab {
+    width: auto;
+  }
+
+  .step-tab:not(.active) .step-title {
+    display: none;
+  }
+
+  .step-title {
+    white-space: nowrap;
+  }
+}
+
+.step-panel {
+  padding: 1.25rem;
   border: 1px solid var(--k-border);
   border-radius: var(--k-radius);
-  overflow: hidden;
+  background: var(--k-bg);
 }
 
-/* the padding leaves room for a card to rise without being cut off */
-.list-pane {
-  max-height: 560px;
-  overflow-y: auto;
-  padding: 6px 6px 0 2px;
+.step-icon {
+  font-size: 26px;
 }
 
-.modal-banner {
-  background: var(--k-surface-alt);
+.tip {
+  padding: 8px 12px;
+  border-left: 3px solid var(--k-brand);
+  background: var(--k-brand-soft);
+  border-radius: 0 8px 8px 0;
+  color: #6b4423;
+}
+
+.shortcut {
   color: var(--k-text);
+}
+
+.shortcut-icon {
+  font-size: 24px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .progress-bar {
+    transition: none;
+  }
 }
 </style>

@@ -110,6 +110,24 @@ export function findProfileSkill(user, field, skillName) {
   return null
 }
 
+// A Firebase Storage download address looks like
+//   https://firebasestorage.googleapis.com/v0/b/<bucket>/o/<the path, encoded>?alt=media&token=...
+// Only such an address, for exactly this path, is accepted: any other https address would make
+// every visitor's browser load a file from a server someone else controls.
+function isStorageUrlOf(url, path) {
+  if (typeof url !== 'string') return false
+  let parsed
+  try {
+    parsed = new URL(url)
+  } catch (err) {
+    return false
+  }
+  return parsed.protocol === 'https:' &&
+    parsed.hostname === 'firebasestorage.googleapis.com' &&
+    parsed.pathname.startsWith('/v0/b/') &&
+    parsed.pathname.endsWith('/o/' + encodeURIComponent(path))
+}
+
 // Checks a list of uploaded files: [{ url, path, type }].
 // The files are uploaded by the browser to Firebase Storage first, then their
 // addresses are sent here. Every path must sit in this user's own folder, so
@@ -120,10 +138,10 @@ export function findMediaProblem(list, uid, max, imagesOnly) {
   if (list.length > max) return 'You can attach up to ' + max + ' files here.'
   for (const item of list) {
     if (typeof item !== 'object' || item === null) return 'A picture is not valid.'
-    if (typeof item.url !== 'string' || !item.url.startsWith('https://')) return 'A picture address is not valid.'
     if (typeof item.path !== 'string' || !item.path.startsWith('skills/' + uid + '/')) {
       return 'A picture is not in your own folder.'
     }
+    if (!isStorageUrlOf(item.url, item.path)) return 'A picture address is not valid.'
     if (item.type !== 'image' && item.type !== 'video') return 'A picture has an unknown type.'
     if (imagesOnly && item.type !== 'image') return 'Only pictures are allowed here.'
   }
