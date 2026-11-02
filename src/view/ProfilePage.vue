@@ -1,16 +1,15 @@
 <script setup>
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { auth } from '../firebase'
 import { useProfileStore } from '../stores/profile'
 import SkillCard from '../components/SkillCard.vue'
 import NavBar from '../components/NavBar.vue'
 import LoadingText from '../components/LoadingText.vue'
-import { useToastStore } from '../stores/toast'
+import EditProfileModal from '../components/EditProfileModal.vue'
 
 const router = useRouter()
 const store = useProfileStore()
-const toast = useToastStore()
 
 // ---------- Load everything from the server ----------
 async function loadPage() {
@@ -51,60 +50,13 @@ const initials = computed(() => {
   return letters.toUpperCase()
 })
 
-// ---------- Editing ----------
+// ---------- Editing (the popup lives in EditProfileModal.vue) ----------
 const isEditing = ref(false)
-const formError = ref('')
-
-// the form works on a copy, so Cancel leaves the real profile untouched
-const draft = reactive({ name: '', bio: '', region: '' })
 
 const skillFields = [
   { field: 'skillsTeach', eyebrow: 'SHARE YOUR KNOWLEDGE', label: 'Skills I Can Teach' },
   { field: 'skillsLearn', eyebrow: 'KEEP GROWING', label: 'Skills I Want to Learn' },
 ]
-
-function openEditor() {
-  draft.name = store.profile.name || ''
-  draft.bio = store.profile.bio || ''
-  draft.region = store.profile.region || ''
-  formError.value = ''
-  isEditing.value = true
-}
-
-function closeEditor() {
-  isEditing.value = false
-}
-
-async function save() {
-  formError.value = ''
-
-  // quick checks so people get instant feedback (the server checks again)
-  const name = draft.name.trim()
-  if (name === '') {
-    formError.value = 'Please enter your name.'
-    return
-  }
-  if (name.length > 60) {
-    formError.value = 'Your name must be 60 characters or fewer.'
-    return
-  }
-  if (draft.bio.length > 300) {
-    formError.value = 'Your bio must be 300 characters or fewer.'
-    return
-  }
-  const saved = await store.saveProfile({
-    name: name,
-    bio: draft.bio.trim(),
-    region: draft.region,
-  })
-
-  if (saved) {
-    isEditing.value = false
-    toast.show('Profile saved.')
-  } else {
-    formError.value = store.saveError
-  }
-}
 </script>
 
 <template>
@@ -133,7 +85,8 @@ async function save() {
         <!-- Profile header -->
         <section class="k-card k-hero p-4 p-md-5 mb-4">
           <div class="d-flex flex-column flex-md-row gap-4 align-items-md-start">
-            <div class="avatar">{{ initials }}</div>
+            <img v-if="store.profile.photo" :src="store.profile.photo" alt="" class="avatar" />
+            <div v-else class="avatar">{{ initials }}</div>
 
             <div class="flex-grow-1">
               <p class="eyebrow mb-1">COMMUNITY MEMBER</p>
@@ -150,7 +103,7 @@ async function save() {
             <button
               type="button"
               class="btn btn-kongsi"
-              @click="openEditor"
+              @click="isEditing = true"
             >
               Edit profile
             </button>
@@ -292,59 +245,7 @@ async function save() {
       </div>
     </div>
 
-    <!-- Edit profile -->
-    <div v-if="isEditing" class="modal-overlay" @click.self="closeEditor">
-      <section class="k-card edit-modal p-4" role="dialog" aria-modal="true" aria-labelledby="edit-title">
-        <div class="d-flex justify-content-between align-items-start mb-3">
-          <h2 id="edit-title" class="h4 mb-0">Edit profile</h2>
-          <button type="button" class="btn-close" aria-label="Close" @click="closeEditor"></button>
-        </div>
-
-        <form @submit.prevent="save">
-          <div class="mb-3">
-            <label for="profile-name" class="form-label">Display name</label>
-            <input
-              id="profile-name"
-              v-model.trim="draft.name"
-              type="text"
-              class="form-control"
-              maxlength="60"
-              required
-            />
-          </div>
-
-          <div class="mb-3">
-            <label for="profile-bio" class="form-label">About me</label>
-            <textarea
-              id="profile-bio"
-              v-model="draft.bio"
-              class="form-control"
-              rows="3"
-              maxlength="300"
-            ></textarea>
-            <small class="text-muted">{{ draft.bio.length }}/300</small>
-          </div>
-
-          <div class="mb-3">
-            <label for="profile-region" class="form-label">Region</label>
-            <select id="profile-region" v-model="draft.region" class="form-select">
-              <option value="">Prefer not to say</option>
-              <option v-for="r in store.regions" :key="r" :value="r">{{ r }}</option>
-            </select>
-            <small class="text-muted">Only your region is shown, never your address.</small>
-          </div>
-
-          <p v-if="formError" class="text-danger small fw-semibold" role="alert">{{ formError }}</p>
-
-          <div class="d-flex justify-content-end gap-2 mt-4">
-            <button type="button" class="btn btn-outline-secondary" @click="closeEditor">Cancel</button>
-            <button type="submit" class="btn btn-kongsi" :disabled="store.saving">
-              {{ store.saving ? 'Saving...' : 'Save changes' }}
-            </button>
-          </div>
-        </form>
-      </section>
-    </div>
+    <EditProfileModal v-if="isEditing" @close="isEditing = false" />
   </main>
 </template>
 
@@ -373,6 +274,7 @@ async function save() {
   color: var(--k-on-accent);
   font-size: 26px;
   font-weight: 700;
+  object-fit: cover;
 }
 
 .credits-card {
@@ -392,23 +294,5 @@ async function save() {
   gap: 12px;
   padding: 10px 0;
   border-top: 1px solid var(--k-border);
-}
-
-.modal-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 1000;
-  background: rgba(35, 29, 21, 0.55);
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  padding: 20px;
-}
-
-.edit-modal {
-  width: 100%;
-  max-width: 560px;
-  max-height: 90vh;
-  overflow-y: auto;
 }
 </style>
