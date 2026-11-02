@@ -433,8 +433,14 @@ function goToInsights() {
 
         <div class="modal-body">
           <dl class="row">
-            <dt class="col-3">Descrption</dt>
-            <dd>{{ selectedSkill.description }}</dd>
+            <dt class="col-3">Description</dt>
+            <dd class="col-9">{{ selectedSkill.description }}</dd>
+            <dt class="col-3">Coach</dt>
+            <dd class="col-9">{{ selectedSkill.teacher }}</dd>
+            <dt class="col-3">Place</dt>
+            <dd class="col-9">{{ selectedSkill.place }}</dd>
+            <dt class="col-3">Capacity</dt>
+            <dd class="col-9">{{ selectedSkill.participants.length  }}/{{ selectedSkill.capacity }}</dd>
           </dl>
           <p class="text-muted">Pick a time that suits you.</p>
 
