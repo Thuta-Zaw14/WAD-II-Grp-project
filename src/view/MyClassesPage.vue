@@ -137,10 +137,16 @@ function creditNote(b) {
   }
   if (b.role === 'learner') {
     if (b.status === 'finished') return cost + ' paid to ' + b.teacherName + '.'
+    if (b.status === 'cancelled' && b.refunded === false) {
+      return 'Cancelled less than 24 hours before the start, so the ' + cost + ' went to ' + b.teacherName + '.'
+    }
     if (b.status === 'cancelled') return cost + ' refunded.'
     return cost + ' held until the course is finished.'
   }
   if (b.status === 'finished') return 'You earned ' + cost + '.'
+  if (b.status === 'cancelled' && b.refunded === false) {
+    return 'The student cancelled less than 24 hours before the start, so you got the ' + cost + '.'
+  }
   if (b.status === 'cancelled') return 'Cancelled by the student. No credits.'
   if (b.status === 'disputed') return cost + ' on hold while the report is looked at.'
   return 'You earn ' + cost + ' when you both confirm it is finished.'
@@ -202,6 +208,7 @@ function upcomingSlots(offer) {
 // Popups open on top of each other, like a stack of cards. "‹" takes the top one off,
 // "×" takes them all off. Each card is { type, bookingId or offerId }.
 //   details     - a class I attend: description, stages, buttons
+//   cancel      - "Cancel this class?" (a class I attend)
 //   reflection  - write the reflection for my current stage
 //   students    - the students in a class I host
 //   student     - one student's progress (view and approve reflections)
@@ -256,8 +263,8 @@ function lockedStageCount(b) {
   return Math.max((b.totalStageCount || 0) - (b.stageNames || []).length, 0)
 }
 
-// cancelling and reporting ask for one more step first
-const extraStep = ref('') // '', 'cancel' or 'report'
+// reporting asks for one more step first, inside the details popup
+const extraStep = ref('') // '' or 'report'
 const reportReason = ref('')
 
 function showExtraStep(step) {
@@ -266,12 +273,24 @@ function showExtraStep(step) {
   store.actionError = ''
 }
 
+// Cancelling a class I attend has its own "Are you sure?" popup. More than 24 hours before
+// the start the credits come back; later than that they go to the teacher (models/bookings.js).
+function openCancel(b) {
+  open({ type: 'cancel', bookingId: b.id })
+}
+
 async function doCancel(b) {
-  if (await store.cancel(b.id)) extraStep.value = ''
+  if (await store.cancel(b.id)) closeAll()
 }
 
 async function doReport(b) {
   if (await store.report(b.id, reportReason.value.trim())) extraStep.value = ''
+}
+
+// PLACEHOLDER: Reschedule (both sides) and the teacher's Cancel are not built yet, so these
+// buttons only say so for now. Replace with the real pages when they exist.
+function comingSoon(what) {
+  toast.show(what + ' is coming soon.')
 }
 
 async function doConfirm(b) {
@@ -602,8 +621,11 @@ async function addSlot() {
     </template>
 
     <!-- what happens next -->
-    <p v-if="topBooking.phase === 'upcoming' && topBooking.canCancel" class="small text-muted mb-2">
-      Free cancellation until {{ formatTime(topBooking.cancelBefore) }}.
+    <p v-if="topBooking.phase === 'upcoming' && topBooking.canCancel && topBooking.cancelRefunds" class="small text-muted mb-2">
+      Free cancellation until {{ formatTime(topBooking.cancelBefore) }}. After that you can still cancel, but your credits go to {{ topBooking.teacherName }}.
+    </p>
+    <p v-else-if="topBooking.phase === 'upcoming' && topBooking.canCancel" class="small text-muted mb-2">
+      It starts in less than 24 hours: you can still cancel, but your credits go to {{ topBooking.teacherName }}.
     </p>
     <p v-else-if="topBooking.phase === 'inProgress'" class="small text-muted mb-2">
       You can mark it finished from {{ formatTime(topBooking.finishAfter) }}.
@@ -616,11 +638,6 @@ async function addSlot() {
     </p>
     <p v-if="topBooking.resolutionNote" class="small text-muted mb-2">Admin's note: {{ topBooking.resolutionNote }}</p>
 
-    <div v-if="extraStep === 'cancel'" class="border rounded p-2 mt-2">
-      <p class="small mb-2">Cancel this booking? {{ creditsText(topBooking.creditCost) }} will be refunded to you.</p>
-      <button class="btn btn-sm btn-danger me-2" :disabled="store.busyId === topBooking.id" @click="doCancel(topBooking)">Yes, cancel</button>
-      <button class="btn btn-sm btn-outline-secondary" @click="extraStep = ''">Keep it</button>
-    </div>
     <div v-if="extraStep === 'report'" class="border rounded p-2 mt-2">
       <label for="report-reason" class="small mb-2">Tell us what went wrong. The credits stay held until it is sorted out.</label>
       <textarea id="report-reason" v-model="reportReason" class="form-control form-control-sm mb-2" rows="3" maxlength="300"></textarea>
@@ -632,10 +649,43 @@ async function addSlot() {
     <div v-if="store.actionError" class="alert alert-danger small mt-2 mb-0" role="alert">{{ store.actionError }}</div>
 
     <template v-if="topBooking.canCancel || topBooking.canReport || topBooking.canConfirm" #footer>
-      <button v-if="topBooking.canCancel" type="button" class="btn btn-sm btn-outline-danger" @click="showExtraStep('cancel')">Cancel booking</button>
+      <button v-if="topBooking.canCancel" type="button" class="btn btn-sm btn-outline-secondary" @click="comingSoon('Rescheduling')">Reschedule</button>
+      <button v-if="topBooking.canCancel" type="button" class="btn btn-sm btn-outline-danger" @click="openCancel(topBooking)">Cancel booking</button>
       <button v-if="topBooking.canReport" type="button" class="btn btn-sm btn-outline-secondary" @click="showExtraStep('report')">Report a problem</button>
       <button v-if="topBooking.canConfirm" type="button" class="btn btn-sm btn-brand" :disabled="store.busyId === topBooking.id" @click="doConfirm(topBooking)">
         Mark as finished
+      </button>
+    </template>
+  </ClassModal>
+
+  <!-- Cancel a class I attend: are you sure? -->
+  <ClassModal
+    v-else-if="top && top.type === 'cancel' && topBooking"
+    title="Cancel this class?"
+    :subtitle="topBooking.title + ' · starts ' + formatTime(topBooking.startsAt)"
+    :can-go-back="stack.length > 1"
+    @back="back"
+    @close="closeAll"
+  >
+    <template v-if="topBooking.cancelRefunds">
+      <p class="mb-2">
+        You'll get your <strong>{{ creditsText(topBooking.creditCost) }}</strong> back, and your seat goes to someone else.
+      </p>
+      <p class="small text-muted mb-0">Free cancellation is open until {{ formatTime(topBooking.cancelBefore) }}.</p>
+    </template>
+    <template v-else>
+      <p class="mb-2">
+        This class starts in less than 24 hours. If you cancel now, you <strong>won't get your
+        {{ creditsText(topBooking.creditCost) }} back</strong>: they go to {{ topBooking.teacherName }}, who kept this time for you.
+      </p>
+      <p class="small text-muted mb-0">Your seat will be freed for someone else.</p>
+    </template>
+    <div v-if="store.actionError" class="alert alert-danger small mt-2 mb-0" role="alert">{{ store.actionError }}</div>
+
+    <template #footer>
+      <button type="button" class="btn btn-sm btn-outline-secondary" @click="stack.length > 1 ? back() : closeAll()">Keep my booking</button>
+      <button type="button" class="btn btn-sm btn-danger" :disabled="store.busyId === topBooking.id" @click="doCancel(topBooking)">
+        {{ store.busyId === topBooking.id ? 'Cancelling...' : 'Yes, cancel' }}
       </button>
     </template>
   </ClassModal>
@@ -760,6 +810,8 @@ async function addSlot() {
       <button v-if="topBooking.canConfirm" type="button" class="btn btn-sm btn-outline-secondary" :disabled="store.busyId === topBooking.id" @click="doConfirm(topBooking)">
         Mark as finished
       </button>
+      <button v-if="topBooking.status === 'booked'" type="button" class="btn btn-sm btn-outline-secondary" @click="comingSoon('Rescheduling')">Reschedule</button>
+      <button v-if="topBooking.status === 'booked'" type="button" class="btn btn-sm btn-outline-danger" @click="comingSoon('Cancelling a session')">Cancel Session</button>
       <button v-if="topBooking.status === 'booked'" type="button" class="btn btn-sm btn-danger" @click="openKick(topBooking)">Kick</button>
     </template>
   </ClassModal>

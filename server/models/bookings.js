@@ -9,8 +9,10 @@
 //   status 'finished'  -> the student AND the teacher confirmed. The teacher gets the credit
 //                         and the student gets a skill card. If the student was invited by a friend
 //                         and this is their first finished course, the friend is rewarded too.
-//   status 'cancelled' -> the student cancelled at least 24 hours before the start, or the
-//                         teacher removed the student from the class (cancelledBy 'teacher'). Refunded.
+//   status 'cancelled' -> the student cancelled before the start, or the teacher removed the
+//                         student from the class (cancelledBy 'teacher'). Refunded, except when the
+//                         student cancelled less than 24 hours before the start (refunded: false):
+//                         then the held credits go to the teacher. Either way the seat is freed.
 //   status 'disputed'  -> someone reported a problem. The credit stays held until an admin settles
 //                         it (Disputes tab of the admin page): either the teacher is paid (the
 //                         booking becomes 'finished', with resolution 'teacher-paid') or the
@@ -299,22 +301,33 @@ export async function cancelBooking(uid, bookingId) {
     if (booking.status !== 'booked') return fail(409, 'This booking is ' + booking.status + '.')
 
     const now = new Date()
-    const deadline = cancelDeadline(new Date(booking.startsAt))
-    if (now >= deadline) {
-      return fail(409, 'A booking can only be cancelled until 24 hours before it starts (' + describeMoment(deadline) + ').')
+    const startsAt = new Date(booking.startsAt)
+    if (now >= startsAt) {
+      return fail(409, 'This class has already started, so it can no longer be cancelled. Use "Report a problem" if something went wrong.')
     }
+    // More than 24 hours before the start: the held credits go back to the student. Later than
+    // that (until the start) the student can still give up the seat, but the credits go to the
+    // teacher, who kept the time free for them.
+    const refunded = now < cancelDeadline(startsAt)
 
     const offerRef = db.collection('offers').doc(booking.offerId)
     const learnerRef = db.collection('users').doc(uid)
+    const teacherRef = db.collection('users').doc(booking.teacherUid)
     const offerSnap = await t.get(offerRef)
     const learnerSnap = await t.get(learnerRef)
-    // without the account there is nowhere to put the refund, so do not cancel and lose the credit
-    if (!learnerSnap.exists) return fail(409, "Your account could not be found, so the credit cannot be refunded.")
+    const teacherSnap = await t.get(teacherRef)
+    // without the account there is nowhere to put the credits, so do not cancel and lose them
+    if (refunded && !learnerSnap.exists) return fail(409, "Your account could not be found, so the credit cannot be refunded.")
+    if (!refunded && !teacherSnap.exists) return fail(409, "The teacher's account could not be found, so this class cannot be cancelled now.")
 
     // --- writes ---
-    const changes = { status: 'cancelled', cancelledAt: now.toISOString(), updatedAt: now.toISOString() }
+    const changes = { status: 'cancelled', cancelledAt: now.toISOString(), refunded: refunded, updatedAt: now.toISOString() }
     t.update(bookingRef, changes)
-    t.update(learnerRef, { credits: (learnerSnap.data().credits || 0) + booking.creditCost }) // refund
+    if (refunded) {
+      t.update(learnerRef, { credits: (learnerSnap.data().credits || 0) + booking.creditCost })
+    } else {
+      t.update(teacherRef, { credits: (teacherSnap.data().credits || 0) + booking.creditCost })
+    }
 
     let offer = null
     if (offerSnap.exists) {

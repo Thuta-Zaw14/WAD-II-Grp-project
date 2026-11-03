@@ -100,7 +100,11 @@ export function publicBooking(booking, uid, now = new Date()) {
     phase: phase,
     myConfirmed: myConfirmed === true,
     otherConfirmed: otherConfirmed === true,
-    canCancel: learnerSide && booking.status === 'booked' && now < cancelDeadline(startsAt),
+    // the student can cancel until the class starts; more than 24 hours before it is refunded,
+    // later than that the credits go to the teacher
+    canCancel: learnerSide && booking.status === 'booked' && now < startsAt,
+    cancelRefunds: now < cancelDeadline(startsAt),
+    refunded: booking.refunded !== false, // false only for a late cancellation, paid to the teacher (older ones were all refunded)
     canConfirm: booking.status === 'booked' && phase === 'readyToFinish' && myConfirmed !== true,
     canReport: booking.status === 'booked' && now >= startsAt,
     reportedByMe: reportedByMe,
