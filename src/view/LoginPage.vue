@@ -313,7 +313,7 @@ async function goToStartPage() {
           <form v-else :key="mode" class="card border-0 shadow w-100 p-4 p-md-5" @submit.prevent="submit">
             <h2 class="h4 mb-4">{{ isSignup ? 'Sign up' : 'Login' }}</h2>
 
-            <p v-if="!isSignup && idleNotice" class="alert alert-info small py-2 mb-3" role="status">{{ idleNotice }}</p>
+            <p v-if="!isSignup && idleNotice" class="idle-notice small mb-3" role="status">{{ idleNotice }}</p>
 
             <p v-if="isSignup && inviteCode !== ''" class="small text-muted mb-3">
               A friend invited you to Kongsi. Sign up to start teaching and learning.
@@ -458,6 +458,14 @@ async function goToStartPage() {
     transform: none;
     opacity: 0;
   }
+}
+
+/* "You were logged out..." in the dark brown and white of the credits box */
+.idle-notice {
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: var(--k-accent);
+  color: var(--k-on-accent);
 }
 
 .card {
