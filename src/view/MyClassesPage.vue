@@ -109,15 +109,6 @@ const stageLabels = {
   todo: 'Ongoing',
 }
 
-// a learner's reflection is waiting for the teacher to look at it
-function needsReview(b) {
-  if (b.status !== 'booked') return false
-  for (const stage of b.stageProgress || []) {
-    if (stage.reflection && !stage.approved) return true
-  }
-  return false
-}
-
 // the stage the learner is working on now (the first one not approved yet), or -1 if all are done
 function currentStageIndex(b) {
   const progress = b.stageProgress || []
@@ -170,9 +161,38 @@ function activeStudentCount(offerId) {
   return store.teaching.filter((b) => b.offerId === offerId && isActive(b)).length
 }
 
-function courseNeedsReview(offerId) {
-  return store.teaching.some((b) => b.offerId === offerId && needsReview(b))
+// ---------- The red numbers ----------
+// unread messages from the other person in one booking's chat
+function unreadOf(b) {
+  if (typeof b.unreadCount === 'number') return b.unreadCount
+  return b.unreadChat ? 1 : 0 // a server from before unreadCount
 }
+
+// reflections a student sent that the teacher has not approved yet
+function reflectionsWaiting(b) {
+  if (b.status !== 'booked') return 0
+  return (b.stageProgress || []).filter((stage) => stage.reflection && !stage.approved).length
+}
+
+// what one of my students is waiting on me for: reflections to approve and messages to read
+function studentActionCount(b) {
+  return reflectionsWaiting(b) + unreadOf(b)
+}
+
+// the same, added up for every student of one course I host
+function courseActionCount(offerId) {
+  let total = 0
+  for (const b of store.teaching) {
+    if (b.offerId === offerId) total += studentActionCount(b)
+  }
+  return total
+}
+
+// the totals next to the two headings (also seen when the lists are folded on a phone)
+const learningAlertCount = computed(() => store.learning.reduce((total, b) => total + unreadOf(b), 0))
+const teachingAlertCount = computed(() =>
+  profileStore.myOffers.reduce((total, offer) => total + courseActionCount(offer.id), 0)
+)
 
 function upcomingSlots(offer) {
   return (offer.slots || []).filter((slot) => !slot.past)
@@ -407,10 +427,20 @@ async function addSlot() {
               :aria-expanded="isOpen('attending')"
               @click="toggleSection('attending')"
             >
-              Classes I Am Attending
+              <span>
+                Classes I Am Attending
+                <span v-if="learningAlertCount > 0" class="count-alert ms-1">
+                  {{ learningAlertCount }}<span class="visually-hidden"> unread messages</span>
+                </span>
+              </span>
               <span class="chevron" aria-hidden="true">▾</span>
             </button>
-            <template v-else>Classes I Am Attending</template>
+            <template v-else>
+              Classes I Am Attending
+              <span v-if="learningAlertCount > 0" class="count-alert ms-1">
+                {{ learningAlertCount }}<span class="visually-hidden"> unread messages</span>
+              </span>
+            </template>
           </h2>
 
           <div v-for="b in store.learning" :key="b.id" class="class-row">
@@ -457,8 +487,8 @@ async function addSlot() {
                 @click="openChat(b)"
               >
                 Chat
-                <span v-if="b.unreadChat" class="dot-alert">
-                  <span class="visually-hidden">New messages</span>
+                <span v-if="unreadOf(b) > 0" class="count-alert count-corner">
+                  {{ unreadOf(b) }}<span class="visually-hidden"> unread messages</span>
                 </span>
               </button>
             </div>
@@ -487,10 +517,20 @@ async function addSlot() {
               :aria-expanded="isOpen('hosting')"
               @click="toggleSection('hosting')"
             >
-              Classes I Am Hosting
+              <span>
+                Classes I Am Hosting
+                <span v-if="teachingAlertCount > 0" class="count-alert ms-1">
+                  {{ teachingAlertCount }}<span class="visually-hidden"> things waiting for you</span>
+                </span>
+              </span>
               <span class="chevron" aria-hidden="true">▾</span>
             </button>
-            <template v-else>Classes I Am Hosting</template>
+            <template v-else>
+              Classes I Am Hosting
+              <span v-if="teachingAlertCount > 0" class="count-alert ms-1">
+                {{ teachingAlertCount }}<span class="visually-hidden"> things waiting for you</span>
+              </span>
+            </template>
           </h2>
 
           <div v-for="offer in profileStore.myOffers" :key="offer.id" class="class-row">
@@ -508,12 +548,12 @@ async function addSlot() {
                 @click="open({ type: 'students', offerId: offer.id })"
               >
                 Students
-                <span v-if="courseNeedsReview(offer.id)" class="dot-alert">
-                  <span class="visually-hidden">A reflection is waiting for you</span>
+                <span v-if="courseActionCount(offer.id) > 0" class="count-alert count-corner">
+                  {{ courseActionCount(offer.id) }}<span class="visually-hidden"> reflections or messages waiting for you</span>
                 </span>
               </button>
               <button type="button" class="btn btn-sm btn-brand" @click="openSlot(offer)">Add time slot</button>
-              <button type="button" class="btn btn-sm btn-link" @click="router.push('/teach/' + offer.id)">Edit course</button>
+              <button type="button" class="btn btn-sm btn-outline-secondary" @click="router.push('/teach/' + offer.id)">Edit course</button>
             </div>
             </template>
           </div>
@@ -650,8 +690,12 @@ async function addSlot() {
         <strong class="d-block text-truncate">{{ b.learnerName }}</strong>
         <small class="text-muted">Starts {{ formatTime(b.startsAt) }} &middot; {{ phaseLabels[b.phase] }}</small>
       </span>
-      <span v-if="needsReview(b)" class="review-badge" title="A reflection is waiting for you">
-        !<span class="visually-hidden"> A reflection is waiting for you</span>
+      <span
+        v-if="studentActionCount(b) > 0"
+        class="count-alert"
+        :title="reflectionsWaiting(b) + ' reflection(s) to approve, ' + unreadOf(b) + ' unread message(s)'"
+      >
+        {{ studentActionCount(b) }}<span class="visually-hidden"> reflections or messages waiting for you</span>
       </span>
     </button>
     <EmptyState v-if="studentsOf(topOffer.id).length === 0" icon="🪑" title="Nobody has booked this class yet." />
@@ -707,8 +751,11 @@ async function addSlot() {
     <div v-if="store.actionError" class="alert alert-danger small mt-2 mb-0" role="alert">{{ store.actionError }}</div>
 
     <template v-if="topBooking.chatOpen || topBooking.messageCount > 0 || topBooking.canConfirm || topBooking.status === 'booked'" #footer>
-      <button v-if="topBooking.chatOpen || topBooking.messageCount > 0" type="button" class="btn btn-sm btn-outline-dark" @click="openChat(topBooking)">
+      <button v-if="topBooking.chatOpen || topBooking.messageCount > 0" type="button" class="btn btn-sm btn-outline-dark position-relative" @click="openChat(topBooking)">
         Chat
+        <span v-if="unreadOf(topBooking) > 0" class="count-alert count-corner">
+          {{ unreadOf(topBooking) }}<span class="visually-hidden"> unread messages</span>
+        </span>
       </button>
       <button v-if="topBooking.canConfirm" type="button" class="btn btn-sm btn-outline-secondary" :disabled="store.busyId === topBooking.id" @click="doConfirm(topBooking)">
         Mark as finished
@@ -846,16 +893,30 @@ async function addSlot() {
   height: 6px;
 }
 
-/* the little red dot on Chat and Students */
-.dot-alert {
-  position: absolute;
-  top: -4px;
-  right: -4px;
-  width: 10px;
-  height: 10px;
-  border: 2px solid var(--k-surface);
-  border-radius: 50%;
+/* the red number: unread messages, or reflections waiting for the teacher */
+.count-alert {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 999px;
   background: var(--k-danger);
+  color: #fff;
+  font-family: var(--k-font-body, inherit);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+  vertical-align: middle;
+}
+
+/* the same number sitting on the corner of a button (Chat, Students) */
+.count-corner {
+  position: absolute;
+  top: -9px;
+  right: -9px;
+  border: 2px solid var(--k-surface);
 }
 
 /* ---------- Inside the popups ---------- */
