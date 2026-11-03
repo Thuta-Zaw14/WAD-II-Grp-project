@@ -392,7 +392,6 @@ async function goToStartPage() {
 }
 
 .form-side {
-  background: var(--k-bg);
   perspective: 1200px; /* gives the card flip its depth */
 }
 

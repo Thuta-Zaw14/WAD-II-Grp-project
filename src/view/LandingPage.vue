@@ -209,10 +209,6 @@ const year = new Date().getFullYear()
 </template>
 
 <style scoped>
-.landing {
-  background: var(--k-bg);
-}
-
 /* jumping to a section leaves room for the sticky bar */
 .landing section[id] {
   scroll-margin-top: 64px;

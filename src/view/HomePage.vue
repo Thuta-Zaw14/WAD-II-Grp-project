@@ -112,7 +112,7 @@ const steps = computed(() => [
     key: 'browse',
     icon: '🗺️',
     title: 'Browse courses',
-    text: 'Search by name, filter by genre and region, or sort by distance to find courses near you. Online classes are listed too.',
+    text: 'Search by name, or filter by genre and region to find courses near you. Online classes are listed too.',
     tip: 'Pins on the map are coloured by genre. Click one to see its start times.',
     action: 'Browse courses',
     to: '/courses',

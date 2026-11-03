@@ -199,6 +199,20 @@ h1, h2, h3, h4, h5, h6,
 .status-cancelled { background: #e8e4dc; color: #5f584d; }
 .status-disputed { background: #f6d5d5; color: #8a1f1f; }
 
+/* The background of every page: a cool light brown fading into a darker brown, with the logo's
+   two overlapping circles repeated faintly over it. It is fixed behind the whole window, so it
+   stays put while the page scrolls (the nav bar and the cards have their own backgrounds). */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background-color: #ddd0c1;
+  background-image:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='72' height='72' viewBox='0 0 72 72'%3E%3Cg fill='none' stroke='%235c4932' stroke-width='1.5'%3E%3Cg stroke-opacity='0.16'%3E%3Ccircle cx='14' cy='18' r='8'/%3E%3Ccircle cx='23' cy='18' r='8'/%3E%3C/g%3E%3Cg stroke-opacity='0.1'%3E%3Ccircle cx='50' cy='54' r='8'/%3E%3Ccircle cx='59' cy='54' r='8'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E"),
+    linear-gradient(160deg, #e8ded2 0%, #d9c9b6 55%, #b9a088 100%);
+}
+
 /* people who asked their system for less motion get no lifting cards */
 @media (prefers-reduced-motion: reduce) {
   .k-lift {
