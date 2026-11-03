@@ -82,53 +82,6 @@ const categoryColors = {
   Tech: '#4a7c59',
 }
 
-// ---------- Near me ----------
-const userPos = ref(null) // { lat, lng } once we know where you are
-const userRegion = ref('')
-const locationError = ref('')
-let youMarker = null
-
-// Work out the region from coordinates (rough cut-offs, not official borders).
-// The server gives each course its region with the same cut-offs (regionOfPoint in
-// server/config/skills.js), so change both together.
-function getRegion(lat, lng) {
-  if (lat > 1.4) return 'North'
-  if (lng < 103.75) return 'West'
-  if (lng > 103.9) return 'East'
-  return 'Central'
-}
-
-// Straight-line distance in km. 1 degree is about 111 km (close enough for Singapore)
-function distanceKm(from, to) {
-  const dLat = to.lat - from.lat
-  const dLng = to.lng - from.lng
-  return Math.sqrt(dLat * dLat + dLng * dLng) * 111
-}
-
-function findMe() {
-  locationError.value = ''
-  navigator.geolocation.getCurrentPosition(
-    (pos) => {
-      const lat = pos.coords.latitude
-      const lng = pos.coords.longitude
-      userPos.value = { lat, lng }
-      userRegion.value = getRegion(lat, lng)
-
-      if (youMarker) youMarker.remove()
-      youMarker = L.circleMarker([lat, lng], { radius: 8, color: 'blue' }).addTo(map)
-    },
-    () => {
-      locationError.value = 'Could not get your location. Allow location access in your browser.'
-    }
-  )
-}
-
-function clearLocation() {
-  userPos.value = null
-  userRegion.value = ''
-  youMarker.remove()
-}
-
 // ---------- The list (also used for the map pins) ----------
 const filteredSkills = computed(() => {
   const results = []
@@ -140,20 +93,8 @@ const filteredSkills = computed(() => {
     const regionMatches = selectedRegion.value === 'All' || item.region === selectedRegion.value
 
     if (textMatches && categoryMatches && regionMatches) {
-      // online classes have no pin, so they have no distance
-      const hasPin = typeof item.lat === 'number' && typeof item.lng === 'number'
-      const distance = userPos.value && hasPin ? distanceKm(userPos.value, item) : null
-      results.push({ ...item, distance })
+      results.push(item)
     }
-  }
-
-  // Closest first, once we know where you are
-  if (userPos.value) {
-    results.sort((a, b) => {
-      if (a.distance === null) return 1 // online classes go last
-      if (b.distance === null) return -1
-      return a.distance - b.distance
-    })
   }
 
   return results
@@ -463,19 +404,8 @@ function resetFilters() {
         >{{ r }}</button>
       </div>
 
-      <p class="small mb-0">
-        <a v-if="!userPos" href="#" @click.prevent="findMe">Sort by distance from me</a>
-        <template v-else>
-          <span class="text-muted">You're in the {{ userRegion }} region. Closest first.</span>
-          <a href="#" class="ms-2" @click.prevent="clearLocation">Clear</a>
-        </template>
-        <a
-          v-if="selectedCategory !== 'All' || selectedRegion !== 'All'"
-          href="#"
-          class="ms-3"
-          @click.prevent="resetFilters"
-        >Reset filters</a>
-        <span v-if="locationError" class="ms-2 text-danger">{{ locationError }}</span>
+      <p v-if="selectedCategory !== 'All' || selectedRegion !== 'All'" class="small mb-0">
+        <a href="#" @click.prevent="resetFilters">Reset filters</a>
       </p>
     </div>
 
@@ -499,7 +429,6 @@ function resetFilters() {
                   <span class="dot" :style="{ background: categoryColors[s.category] }"></span>{{ s.category }}
                 </span>
                 <span v-if="hasBooked(s)" class="badge rounded-pill text-bg-success">Booked</span>
-                <small v-else-if="s.distance !== null" class="text-muted">{{ s.distance.toFixed(1) }} km away</small>
               </div>
 
               <h2 class="h5 mb-2">{{ s.title }}</h2>
