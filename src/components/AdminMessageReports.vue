@@ -153,8 +153,9 @@ async function decide(report) {
         <p v-if="!loading && props.reports.open.length === 0" class="text-muted mb-0">Nothing to look at. 🎉</p>
 
         <div v-for="r in props.reports.open" :key="r.id" class="report border-bottom py-3">
-          <div class="d-flex justify-content-between align-items-start gap-3">
-            <div class="flex-grow-1">
+          <!-- on a phone the buttons go under the report instead of beside it -->
+          <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-start gap-3">
+            <div class="flex-grow-1 min-w-0">
               <span class="badge" :class="r.kind === 'public' ? 'text-bg-secondary' : 'text-bg-dark'">{{ kindText(r) }}</span>
               <strong class="ms-2">{{ r.title }}</strong>
 
@@ -170,7 +171,7 @@ async function decide(report) {
               </div>
             </div>
 
-            <div class="d-flex gap-2 flex-shrink-0">
+            <div class="d-flex flex-wrap gap-2 flex-shrink-0">
               <button class="btn btn-sm btn-outline-secondary" @click="toggleContext(r)">
                 {{ contextId === r.id ? 'Hide context' : 'View context' }}
               </button>
@@ -241,6 +242,8 @@ async function decide(report) {
     <div class="card custom-card">
       <div class="card-body">
         <h2 class="h5 mb-3">Recently handled</h2>
+        <!-- scrolls sideways on a narrow screen instead of squashing the columns -->
+        <div class="table-responsive">
         <table class="table align-middle mb-0">
           <thead>
             <tr>
@@ -268,12 +271,17 @@ async function decide(report) {
             </tr>
           </tbody>
         </table>
+        </div>
       </div>
     </div>
   </div>
 </template>
 
 <style scoped>
+.min-w-0 {
+  min-width: 0;
+}
+
 .custom-card {
   border: none;
   border-radius: 20px;

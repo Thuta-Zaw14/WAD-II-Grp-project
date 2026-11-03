@@ -1,32 +1,13 @@
 <script setup>
-import { useRouter } from 'vue-router'
+import { usePreviousPage } from '@/services/previousPage'
 
 // The "← Back to …" button at the top of a form page. It goes back to the page you came from
 // (e.g. Profile or My Classes) and names it; opened straight from an address, it goes to `fallback`.
 const props = defineProps({
-  fallback: { type: String, required: true }, // one of the paths in pageNames
+  fallback: { type: String, required: true }, // one of the paths in services/previousPage.js
 })
 
-const router = useRouter()
-
-const pageNames = {
-  '/home': 'Home',
-  '/profile': 'Profile',
-  '/classes': 'My Classes',
-  '/courses': 'Courses',
-}
-
-// vue-router keeps the address of the page before this one in history.state.back
-const state = window.history.state
-const previous = state && typeof state.back === 'string' ? state.back.split('?')[0] : ''
-const cameFromKnownPage = pageNames[previous] !== undefined
-
-const label = 'Back to ' + pageNames[cameFromKnownPage ? previous : props.fallback]
-
-function goBack() {
-  if (cameFromKnownPage) router.back()
-  else router.push(props.fallback)
-}
+const { label, goBack } = usePreviousPage(props.fallback)
 </script>
 
 <template>
