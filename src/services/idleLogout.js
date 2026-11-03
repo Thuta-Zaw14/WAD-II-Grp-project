@@ -19,6 +19,7 @@ const MINUTE = 60 * 1000
 export const idleState = reactive({
   warning: false, // true once the warning time has passed
   secondsLeft: 0, // until the logout
+  cameBack: 0, // goes up by one each time someone clicks while the box shows (it says hello)
 })
 
 // set by startIdleWatch; the shorter times are only used by tests
@@ -43,7 +44,11 @@ export function markActive() {
 
 // activity happens many times a second while scrolling, so save it at most once a second
 function onActivity() {
-  if (Date.now() - lastSaved < 1000 && !idleState.warning) return
+  if (idleState.warning) {
+    idleState.cameBack++ // they answered the "Still there?" box
+  } else if (Date.now() - lastSaved < 1000) {
+    return
+  }
   markActive()
 }
 
