@@ -45,6 +45,55 @@ function bookedByOf(slot) {
   return Array.isArray(slot.bookedBy) ? slot.bookedBy : []
 }
 
+// The course details a booking keeps its own copy of (shown on My Classes). Copied when the
+// booking is made, and again when the teacher edits the course (syncBookingsWithOffer).
+function courseDetailsOf(offer) {
+  const stageNames = []
+  for (const stage of offer.stages || []) stageNames.push(stage.name)
+  return {
+    title: offer.title || offer.skill || '',
+    skill: offer.skill || '',
+    category: offer.category || '',
+    mode: offer.mode || '',
+    region: offer.region || '',
+    place: offer.place || '',
+    address: offer.address || '', // the full address, for courses whose place was picked on the map
+    stageNames: stageNames,
+    sessionDurationMinutes: Number.isInteger(offer.sessionDurationMinutes) ? offer.sessionDurationMinutes : 60,
+    durationWeeks: Number.isInteger(offer.durationWeeks) && offer.durationWeeks >= 1 ? offer.durationWeeks : 1,
+    lessonsPerWeek: Number.isInteger(offer.lessonsPerWeek) ? offer.lessonsPerWeek : 1,
+  }
+}
+
+// The teacher edited a course: bring the copy in each of its active bookings up to date, so
+// the students see the new details. Finished and cancelled bookings keep the course as it was
+// when they took it, and the price paid and the start time never change. A stage that was
+// added starts unapproved; the reflections already written stay with their stage number.
+// -> how many bookings were updated
+export async function syncBookingsWithOffer(offerId, offer) {
+  const result = await findDocsWhereEquals('bookings', 'offerId', offerId)
+  if (!result.status) throw new Error('could not load the bookings of course ' + offerId)
+
+  const details = courseDetailsOf(offer)
+  const nowText = new Date().toISOString()
+  const batch = db.batch()
+  let count = 0
+  for (const booking of result.docs) {
+    if (booking.status !== 'booked' && booking.status !== 'disputed') continue
+
+    const changes = { ...details, updatedAt: nowText }
+    if (offer.teacherName) changes.teacherName = offer.teacherName
+    const startsAt = new Date(booking.startsAt)
+    if (!Number.isNaN(startsAt.getTime())) {
+      changes.finishAfter = finishTime(startsAt, details.durationWeeks).toISOString()
+    }
+    batch.update(db.collection('bookings').doc(booking.id), changes)
+    count++
+  }
+  if (count > 0) await batch.commit()
+  return count
+}
+
 function stageProgressOf(booking) {
   const stageNames = Array.isArray(booking.stageNames) ? booking.stageNames : []
   const savedProgress = Array.isArray(booking.stageProgress) ? booking.stageProgress : []
@@ -195,11 +244,9 @@ export async function bookSlot(uid, offerId, slotId) {
     t.update(offerRef, { slots: newSlots })
     t.update(learnerRef, { credits: credits - cost }) // the credit is held from now on
 
-    // The booking keeps its own copy of the course details, so "My sessions" still
-    // reads correctly if the teacher later edits the course.
-    const stageNames = []
-    for (const stage of offer.stages || []) stageNames.push(stage.name)
-    const weeks = Number.isInteger(offer.durationWeeks) && offer.durationWeeks >= 1 ? offer.durationWeeks : 1
+    // The booking keeps its own copy of the course details for My Classes. When the teacher
+    // edits the course, syncBookingsWithOffer brings the copy up to date.
+    const details = courseDetailsOf(offer)
     const nowText = now.toISOString()
 
     const bookingRef = db.collection('bookings').doc()
@@ -210,15 +257,8 @@ export async function bookSlot(uid, offerId, slotId) {
       learnerName: learner.name.trim(),
       teacherUid: offer.teacherUid,
       teacherName: offer.teacherName || teacherSnap.data().name || '',
-      title: offer.title || offer.skill || '',
-      skill: offer.skill || '',
-      category: offer.category || '',
-      mode: offer.mode || '',
-      region: offer.region || '',
-      place: offer.place || '',
-      address: offer.address || '', // the full address, for courses whose place was picked on the map
-      stageNames: stageNames,
-      stageProgress: stageNames.map(() => ({
+      ...details,
+      stageProgress: details.stageNames.map(() => ({
         reflection: '',
         submittedAt: '',
         approved: false,
@@ -226,13 +266,8 @@ export async function bookSlot(uid, offerId, slotId) {
       })),
       slotDate: slot.date,
       slotTime: slot.time,
-      sessionDurationMinutes: Number.isInteger(offer.sessionDurationMinutes)
-        ? offer.sessionDurationMinutes
-        : 60,
-      durationWeeks: Number.isInteger(offer.durationWeeks) ? offer.durationWeeks : 1,
-      lessonsPerWeek: Number.isInteger(offer.lessonsPerWeek) ? offer.lessonsPerWeek : 1,
       startsAt: startsAt.toISOString(),
-      finishAfter: finishTime(startsAt, weeks).toISOString(), // when both people can confirm it is finished
+      finishAfter: finishTime(startsAt, details.durationWeeks).toISOString(), // when both people can confirm it is finished
       creditCost: cost, // the price at the time of booking, even if the teacher changes it later
       status: 'booked',
       learnerConfirmed: false,

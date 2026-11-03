@@ -5,7 +5,7 @@ import { addDoc, getAllDocs, findDocsWhereEquals } from '../models/dbQuery.js'
 import { findProfileSkill, findMediaProblem, cleanMedia, allMediaPaths, findTitleProblem } from '../models/skillRules.js'
 import { slotMoment } from '../models/bookingRules.js'
 import { publicOffer, publicBooking } from '../models/publicView.js'
-import { bookSlot } from '../models/bookings.js'
+import { bookSlot, syncBookingsWithOffer } from '../models/bookings.js'
 import { deleteDiscussion, isValidId } from '../models/discussions.js'
 import { verifyPlace } from '../models/places.js'
 import { MAX_STAGES, calcCreditCost } from '../config/credits.js'
@@ -457,6 +457,14 @@ router.put('/:id', verifyToken, async (req, res) => {
   })
   if (outcome.error) {
     return res.status(outcome.status).json({ error: outcome.error })
+  }
+
+  // the students who booked it see the new details on My Classes (models/bookings.js).
+  // The course itself is already saved, so a problem here is only logged.
+  try {
+    await syncBookingsWithOffer(existing.id, offer)
+  } catch (err) {
+    console.log('syncBookingsWithOffer failed:', err.message)
   }
 
   // pictures the teacher took off: the browser deletes these from Storage
