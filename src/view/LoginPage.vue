@@ -5,6 +5,9 @@ import {
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
   signOut,
+  setPersistence,
+  browserSessionPersistence,
+  browserLocalPersistence,
 } from 'firebase/auth'
 import { useRouter, useRoute } from 'vue-router'
 import { checkAdmin, verifyResetCode, resetPassword, errorText } from '../services/api'
@@ -163,18 +166,27 @@ async function submit() {
 // refused by the server on this very first request, so they are logged straight out again.
 async function goToStartPage() {
   let admin = false
+
   try {
     const answer = await checkAdmin()
-    admin = answer.isAdmin
+    console.log('Admin response:', answer)
+    admin = answer?.isAdmin === true
+    if (admin) {
+      await setPersistence(auth, browserSessionPersistence)
+    } else {
+      await setPersistence(auth, browserLocalPersistence
+      )
+    }
   } catch (err) {
+    console.error(err)
     if (err.response && err.response.status === 403) {
       await signOut(auth)
       isError.value = true
       message.value = 'Failed: ' + errorText(err)
       return
-    }
-    // any other problem: carry on as a normal user (the admin pages check again anyway)
+    } 
   }
+  // any other problem: carry on as a normal user (the admin pages check again anyway)
   router.push(admin ? '/admins' : '/home')
 }
 </script>
