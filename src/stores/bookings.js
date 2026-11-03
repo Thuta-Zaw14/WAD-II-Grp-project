@@ -85,7 +85,9 @@ export const useBookingsStore = defineStore('bookings', () => {
     }
   }
 
-  // Cancel a booking (the credit comes back). Returns true / false like book().
+  // Cancel a booking (the credit comes back, unless it was less than 24 hours before the start:
+  // then it goes to the teacher).
+  // Returns true / false like book().
   async function cancel(id) {
     busyId.value = id
     actionError.value = ''
@@ -94,7 +96,11 @@ export const useBookingsStore = defineStore('bookings', () => {
       replaceBooking(data.booking)
       if (data.offer) useOffersStore().replaceOffer(data.offer) // the seat is free again
       await useProfileStore().fetchProfile()
-      useToastStore().show('Booking cancelled. Your credits are back.')
+      useToastStore().show(
+        data.booking.refunded === false
+          ? 'Booking cancelled. It was less than 24 hours before the start, so the credits went to the teacher.'
+          : 'Booking cancelled. Your credits are back.'
+      )
       busyId.value = ''
       return true
     } catch (err) {
