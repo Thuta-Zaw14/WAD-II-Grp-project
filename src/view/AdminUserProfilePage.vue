@@ -280,7 +280,6 @@ onMounted(loadUser)
 
 <style scoped>
 .profile-page {
-  background: var(--k-bg);
   min-height: 100vh;
 }
 

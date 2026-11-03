@@ -385,7 +385,6 @@ onMounted(loadAll)
 
 <style scoped>
 .admin-page {
-  background: var(--k-bg);
   min-height: 100vh;
 }
 

@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { auth } from '@/firebase'
 import { useProfileStore } from '@/stores/profile'
 import NavBar from '@/components/NavBar.vue'
+import BackButton from '@/components/BackButton.vue'
 import LoadingText from '@/components/LoadingText.vue'
 import { useToastStore } from '@/stores/toast'
 import { findSkillNameProblem, squeezeSpaces } from '@/services/skillRules'
@@ -151,9 +152,7 @@ async function saveSkills() {
   <NavBar />
 
   <main class="container py-4" style="max-width: 760px">
-    <button class="btn btn-link px-0 mb-2" type="button" @click="router.push('/profile')">
-      &larr; Back to profile
-    </button>
+    <BackButton fallback="/profile" class="mb-3" />
 
     <LoadingText v-if="loading" />
     <div v-else-if="loadError" class="alert alert-danger" role="alert">
