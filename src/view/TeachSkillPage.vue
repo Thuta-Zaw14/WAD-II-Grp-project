@@ -12,12 +12,16 @@ import PlacePicker from '@/components/PlacePicker.vue'
 import { picturesEnabled } from '@/config'
 import { findTitleProblem } from '@/services/skillRules'
 import NavBar from '@/components/NavBar.vue'
+import BackButton from '@/components/BackButton.vue'
 import LoadingText from '@/components/LoadingText.vue'
 import { useToastStore } from '@/stores/toast'
+import { usePreviousPage } from '@/services/previousPage'
 
 // The address /teach/:id gives us the id of the course being edited (none = a new course)
 const props = defineProps({ id: { type: String, default: null } })
 const router = useRouter()
+// saving, cancelling and deleting go back to where you came from (Profile or My Classes)
+const { goBack: goToPreviousPage } = usePreviousPage('/classes')
 const store = useProfileStore()
 const toast = useToastStore()
 const isEdit = computed(() => !!props.id)
@@ -402,7 +406,7 @@ async function save() {
     }
 
     toast.show('Course saved.')
-    router.push('/classes')
+    goToPreviousPage()
   } catch (err) {
     await deleteMany(uploaded) // the save failed: do not leave unused files in Storage
     error.value = errorText(err)
@@ -418,7 +422,7 @@ async function remove() {
     const result = await deleteOffer(props.id)
     await deleteMany(result.removedPaths)
     toast.show('Course deleted.')
-    router.push('/classes')
+    goToPreviousPage()
   } catch (err) {
     error.value = errorText(err)
   }
@@ -428,340 +432,340 @@ async function remove() {
 <template>
   <NavBar />
   <main class="container py-4" style="max-width: 760px">
-    <button class="btn btn-link px-0 mb-2" @click="router.push('/classes')">
-      &larr; Back to My classes
-    </button>
+    <BackButton fallback="/classes" class="mb-3" />
+    <section class="k-card k-form-card p-4">
 
-    <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
-      <h1 class="h4 mb-0">
-      {{ isEdit ? 'Edit course' : 'Add a skill I can teach' }}
-      </h1>
-    </div>
-
-    <LoadingText v-if="loading" />
-    <div v-else-if="blocked" class="alert alert-danger" role="alert">
-      {{ error }}
-    </div>
-
-    <!-- First time here: the profile needs a name and a skill to teach -->
-    <div v-else-if="!profileReady" class="alert alert-warning">
-      Before you can offer a course, add your name and at least one skill under
-      "Skills I can teach" on your profile.
-      <a href="#" @click.prevent="router.push('/profile')">Go to my profile</a>
-    </div>
-
-    <template v-else>
-      <div v-if="error" class="alert alert-danger" role="alert">
-        <strong>Could not save:</strong> {{ error }}
+      <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+        <h1 class="h4 mb-0">
+        {{ isEdit ? 'Edit course' : 'Add a skill I can teach' }}
+        </h1>
       </div>
 
-      <form novalidate @submit.prevent="save">
-        <!-- The skill comes from the profile, so the genre is already known -->
-        <div class="mb-3">
-          <label class="form-label" for="teach-skill">Skill <span class="required-marker" aria-hidden="true">*</span></label>
-          <select
-            id="teach-skill"
-            v-model="skill"
-            class="form-select"
-            :class="{ 'is-invalid': fieldErrors.skill }"
-            :aria-invalid="!!fieldErrors.skill"
-            :aria-describedby="fieldErrors.skill ? 'teach-skill-error' : undefined"
-            required
-            @change="handleFieldChange('skill')"
-            @blur="handleFieldChange('skill')"
-          >
-            <option disabled value="">Pick one of your skills</option>
-            <option v-for="s in store.profile.skillsTeach" :key="s.name" :value="s.name">{{ s.name }}</option>
-          </select>
-          <div v-if="fieldErrors.skill" id="teach-skill-error" class="invalid-feedback d-block">
-            {{ fieldErrors.skill }}
-          </div>
-          <small v-if="skillGenre" class="text-muted">Genre: {{ skillGenre }}</small>
-          <small v-else class="text-muted">
-            Not in the list? Add it under "Skills I can teach" on your profile first.
-          </small>
+      <LoadingText v-if="loading" />
+      <div v-else-if="blocked" class="alert alert-danger" role="alert">
+        {{ error }}
+      </div>
+
+      <!-- First time here: the profile needs a name and a skill to teach -->
+      <div v-else-if="!profileReady" class="alert alert-warning">
+        Before you can offer a course, add your name and at least one skill under
+        "Skills I can teach" on your profile.
+        <a href="#" @click.prevent="router.push('/profile')">Go to my profile</a>
+      </div>
+
+      <template v-else>
+        <div v-if="error" class="alert alert-danger" role="alert">
+          <strong>Could not save:</strong> {{ error }}
         </div>
 
-        <SkillsBasicsField
-          v-model:title="title"
-          v-model:description="description"
-          v-model:media="media"
-          :title-error="fieldErrors.title"
-          @title-input="handleFieldChange('title')"
-          @title-blur="handleFieldChange('title')"
-        />
-
-        <hr />
-        <h2 class="h6">Class details</h2>
-
-        <div class="mb-3">
-          <div class="form-check form-check-inline">
-            <input id="mode-physical" v-model="mode" type="radio" value="physical" class="form-check-input" @change="handleModeChange" />
-            <label class="form-check-label" for="mode-physical">Physical class</label>
-          </div>
-          <div class="form-check form-check-inline">
-            <input id="mode-online" v-model="mode" type="radio" value="online" class="form-check-input" @change="handleModeChange" />
-            <label class="form-check-label" for="mode-online">Online class</label>
-          </div>
-        </div>
-
-        <template v-if="physical">
-          <!-- The place comes from a map search (OneMap), so it is real and its pin is exact.
-               The region is worked out from it by the server. -->
+        <form novalidate @submit.prevent="save">
+          <!-- The skill comes from the profile, so the genre is already known -->
           <div class="mb-3">
-            <PlacePicker
-              :model-value="meetingPlace"
-              input-id="class-place"
-              :error="fieldErrors.location"
-              :old-place="oldPlace"
-              @update:model-value="onPlacePicked"
-              @leave="handleFieldChange('location')"
-            />
+            <label class="form-label" for="teach-skill">Skill <span class="required-marker" aria-hidden="true">*</span></label>
+            <select
+              id="teach-skill"
+              v-model="skill"
+              class="form-select"
+              :class="{ 'is-invalid': fieldErrors.skill }"
+              :aria-invalid="!!fieldErrors.skill"
+              :aria-describedby="fieldErrors.skill ? 'teach-skill-error' : undefined"
+              required
+              @change="handleFieldChange('skill')"
+              @blur="handleFieldChange('skill')"
+            >
+              <option disabled value="">Pick one of your skills</option>
+              <option v-for="s in store.profile.skillsTeach" :key="s.name" :value="s.name">{{ s.name }}</option>
+            </select>
+            <div v-if="fieldErrors.skill" id="teach-skill-error" class="invalid-feedback d-block">
+              {{ fieldErrors.skill }}
+            </div>
+            <small v-if="skillGenre" class="text-muted">Genre: {{ skillGenre }}</small>
+            <small v-else class="text-muted">
+              Not in the list? Add it under "Skills I can teach" on your profile first.
+            </small>
           </div>
 
-          <div class="mb-3">
-            <div class="fw-semibold mb-1">Equipment</div>
-            <div class="form-check">
-              <input id="equip-provided" v-model="equipmentOption" type="radio" value="provided" class="form-check-input" />
-              <label class="form-check-label" for="equip-provided">Provided by the teacher (students pay +1 credit)</label>
-            </div>
-            <div class="form-check">
-              <input id="equip-bring" v-model="equipmentOption" type="radio" value="bring" class="form-check-input" />
-              <label class="form-check-label" for="equip-bring">Students bring their own</label>
-            </div>
-            <div class="form-check">
-              <input id="equip-not-required" v-model="equipmentOption" type="radio" value="not_required" class="form-check-input" />
-              <label class="form-check-label" for="equip-not-required">Equipment is not required</label>
-            </div>
-          </div>
-        </template>
-
-        <div class="mb-3">
-          <div class="fw-semibold mb-1">Difficulty</div>
-          <div class="form-check">
-            <input id="diff-standard" v-model="difficulty" type="radio" value="standard" class="form-check-input" />
-            <label class="form-check-label" for="diff-standard">Standard</label>
-          </div>
-          <div class="form-check">
-            <input id="diff-risk" v-model="difficulty" type="radio" value="high_risk" class="form-check-input" />
-            <label class="form-check-label" for="diff-risk">High difficulty</label>
-          </div>
-        </div>
-
-        <div class="mb-3">
-          <label class="form-label" for="max-capacity">Maximum students per class <span class="required-marker" aria-hidden="true">*</span></label>
-          <input
-            id="max-capacity"
-            v-model.number="maxCapacity"
-            type="number"
-            min="1"
-            max="50"
-            class="form-control"
-            :class="{ 'is-invalid': fieldErrors.maxCapacity }"
-            :aria-invalid="!!fieldErrors.maxCapacity"
-            :aria-describedby="fieldErrors.maxCapacity ? 'max-capacity-error' : undefined"
-            required
-            @input="handleFieldChange('maxCapacity')"
-            @blur="handleFieldChange('maxCapacity')"
+          <SkillsBasicsField
+            v-model:title="title"
+            v-model:description="description"
+            v-model:media="media"
+            :title-error="fieldErrors.title"
+            @title-input="handleFieldChange('title')"
+            @title-blur="handleFieldChange('title')"
           />
-          <div v-if="fieldErrors.maxCapacity" id="max-capacity-error" class="invalid-feedback d-block">
-            {{ fieldErrors.maxCapacity }}
-          </div>
-        </div>
 
-        <div class="row g-3 mb-3">
-          <div class="col-12 col-sm-4">
-            <label class="form-label" for="weeks">Course length (weeks) <span class="required-marker" aria-hidden="true">*</span></label>
-            <input id="weeks" v-model.number="durationWeeks" type="number" min="1" max="52" class="form-control" :class="{ 'is-invalid': fieldErrors.durationWeeks }" :aria-invalid="!!fieldErrors.durationWeeks" :aria-describedby="fieldErrors.durationWeeks ? 'weeks-error' : undefined" required @input="handleFieldChange('durationWeeks')" @blur="handleFieldChange('durationWeeks')" />
-            <div v-if="fieldErrors.durationWeeks" id="weeks-error" class="invalid-feedback d-block">{{ fieldErrors.durationWeeks }}</div>
+          <hr />
+          <h2 class="h6">Class details</h2>
+
+          <div class="mb-3">
+            <div class="form-check form-check-inline">
+              <input id="mode-physical" v-model="mode" type="radio" value="physical" class="form-check-input" @change="handleModeChange" />
+              <label class="form-check-label" for="mode-physical">Physical class</label>
+            </div>
+            <div class="form-check form-check-inline">
+              <input id="mode-online" v-model="mode" type="radio" value="online" class="form-check-input" @change="handleModeChange" />
+              <label class="form-check-label" for="mode-online">Online class</label>
+            </div>
           </div>
-          <div class="col-12 col-sm-4">
-            <label class="form-label" for="lessons">Lessons per week <span class="required-marker" aria-hidden="true">*</span></label>
-            <input id="lessons" v-model.number="lessonsPerWeek" type="number" min="1" max="7" class="form-control" :class="{ 'is-invalid': fieldErrors.lessonsPerWeek }" :aria-invalid="!!fieldErrors.lessonsPerWeek" :aria-describedby="fieldErrors.lessonsPerWeek ? 'lessons-error' : undefined" required @input="handleFieldChange('lessonsPerWeek')" @blur="handleFieldChange('lessonsPerWeek')" />
-            <div v-if="fieldErrors.lessonsPerWeek" id="lessons-error" class="invalid-feedback d-block">{{ fieldErrors.lessonsPerWeek }}</div>
+
+          <template v-if="physical">
+            <!-- The place comes from a map search (OneMap), so it is real and its pin is exact.
+                 The region is worked out from it by the server. -->
+            <div class="mb-3">
+              <PlacePicker
+                :model-value="meetingPlace"
+                input-id="class-place"
+                :error="fieldErrors.location"
+                :old-place="oldPlace"
+                @update:model-value="onPlacePicked"
+                @leave="handleFieldChange('location')"
+              />
+            </div>
+
+            <div class="mb-3">
+              <div class="fw-semibold mb-1">Equipment</div>
+              <div class="form-check">
+                <input id="equip-provided" v-model="equipmentOption" type="radio" value="provided" class="form-check-input" />
+                <label class="form-check-label" for="equip-provided">Provided by the teacher (students pay +1 credit)</label>
+              </div>
+              <div class="form-check">
+                <input id="equip-bring" v-model="equipmentOption" type="radio" value="bring" class="form-check-input" />
+                <label class="form-check-label" for="equip-bring">Students bring their own</label>
+              </div>
+              <div class="form-check">
+                <input id="equip-not-required" v-model="equipmentOption" type="radio" value="not_required" class="form-check-input" />
+                <label class="form-check-label" for="equip-not-required">Equipment is not required</label>
+              </div>
+            </div>
+          </template>
+
+          <div class="mb-3">
+            <div class="fw-semibold mb-1">Difficulty</div>
+            <div class="form-check">
+              <input id="diff-standard" v-model="difficulty" type="radio" value="standard" class="form-check-input" />
+              <label class="form-check-label" for="diff-standard">Standard</label>
+            </div>
+            <div class="form-check">
+              <input id="diff-risk" v-model="difficulty" type="radio" value="high_risk" class="form-check-input" />
+              <label class="form-check-label" for="diff-risk">High difficulty</label>
+            </div>
           </div>
-          <div class="col-12 col-sm-4">
-            <label class="form-label" for="session-duration">Session duration (minutes) <span class="required-marker" aria-hidden="true">*</span></label>
+
+          <div class="mb-3">
+            <label class="form-label" for="max-capacity">Maximum students per class <span class="required-marker" aria-hidden="true">*</span></label>
             <input
-              id="session-duration"
-              v-model.number="sessionDurationMinutes"
+              id="max-capacity"
+              v-model.number="maxCapacity"
               type="number"
               min="1"
-              max="1440"
+              max="50"
               class="form-control"
-              :class="{ 'is-invalid': fieldErrors.sessionDurationMinutes }"
-              :aria-invalid="!!fieldErrors.sessionDurationMinutes"
-              :aria-describedby="fieldErrors.sessionDurationMinutes ? 'session-duration-error' : undefined"
+              :class="{ 'is-invalid': fieldErrors.maxCapacity }"
+              :aria-invalid="!!fieldErrors.maxCapacity"
+              :aria-describedby="fieldErrors.maxCapacity ? 'max-capacity-error' : undefined"
               required
-              @input="handleFieldChange('sessionDurationMinutes')"
-              @blur="handleFieldChange('sessionDurationMinutes')"
+              @input="handleFieldChange('maxCapacity')"
+              @blur="handleFieldChange('maxCapacity')"
             />
-            <div v-if="fieldErrors.sessionDurationMinutes" id="session-duration-error" class="invalid-feedback d-block">
-              {{ fieldErrors.sessionDurationMinutes }}
+            <div v-if="fieldErrors.maxCapacity" id="max-capacity-error" class="invalid-feedback d-block">
+              {{ fieldErrors.maxCapacity }}
             </div>
           </div>
-        </div>
 
-        <hr />
-        <h2 class="h6">Start dates and times <span class="required-marker" aria-hidden="true">*</span></h2>
-        <p class="text-muted small">
-          Students book one of these. Add at least one (Singapore time).
-        </p>
-
-        <ul class="list-group mb-2">
-          <li
-            v-for="(s, i) in slots"
-            :key="s.date + s.time"
-            class="list-group-item d-flex justify-content-between align-items-center"
-          >
-            <span>
-              {{ s.date }} &middot; {{ s.time }}
-              <small v-if="s.taken > 0" class="text-muted ms-2">{{ s.taken }} booked</small>
-            </span>
-            <button
-              type="button"
-              class="btn btn-sm btn-outline-danger"
-              :disabled="s.taken > 0"
-              :title="s.taken > 0 ? 'Students have booked this start time' : ''"
-              @click="removeSlot(i)"
-            >
-              Remove
-            </button>
-          </li>
-          <li v-if="slots.length === 0" class="list-group-item text-muted">No start times yet</li>
-        </ul>
-
-        <div class="row g-2 mb-4">
-          <div class="col-12 col-sm-4">
-            <label class="form-label" for="slot-date">Start date <span v-if="slots.length === 0" class="required-marker" aria-hidden="true">*</span></label>
-            <input
-              id="slot-date"
-              v-model="slotDate"
-              type="date"
-              class="form-control"
-              :class="{ 'is-invalid': fieldErrors.slotDate }"
-              :aria-invalid="!!fieldErrors.slotDate"
-              :aria-describedby="fieldErrors.slotDate ? 'slot-date-error' : undefined"
-              :min="today"
-              :required="slots.length === 0"
-              @input="handleFieldChange('slotDate')"
-              @blur="handleFieldChange('slotDate')"
-            />
-            <div v-if="fieldErrors.slotDate" id="slot-date-error" class="invalid-feedback d-block">
-              {{ fieldErrors.slotDate }}
+          <div class="row g-3 mb-3">
+            <div class="col-12 col-sm-4">
+              <label class="form-label" for="weeks">Course length (weeks) <span class="required-marker" aria-hidden="true">*</span></label>
+              <input id="weeks" v-model.number="durationWeeks" type="number" min="1" max="52" class="form-control" :class="{ 'is-invalid': fieldErrors.durationWeeks }" :aria-invalid="!!fieldErrors.durationWeeks" :aria-describedby="fieldErrors.durationWeeks ? 'weeks-error' : undefined" required @input="handleFieldChange('durationWeeks')" @blur="handleFieldChange('durationWeeks')" />
+              <div v-if="fieldErrors.durationWeeks" id="weeks-error" class="invalid-feedback d-block">{{ fieldErrors.durationWeeks }}</div>
+            </div>
+            <div class="col-12 col-sm-4">
+              <label class="form-label" for="lessons">Lessons per week <span class="required-marker" aria-hidden="true">*</span></label>
+              <input id="lessons" v-model.number="lessonsPerWeek" type="number" min="1" max="7" class="form-control" :class="{ 'is-invalid': fieldErrors.lessonsPerWeek }" :aria-invalid="!!fieldErrors.lessonsPerWeek" :aria-describedby="fieldErrors.lessonsPerWeek ? 'lessons-error' : undefined" required @input="handleFieldChange('lessonsPerWeek')" @blur="handleFieldChange('lessonsPerWeek')" />
+              <div v-if="fieldErrors.lessonsPerWeek" id="lessons-error" class="invalid-feedback d-block">{{ fieldErrors.lessonsPerWeek }}</div>
+            </div>
+            <div class="col-12 col-sm-4">
+              <label class="form-label" for="session-duration">Session duration (minutes) <span class="required-marker" aria-hidden="true">*</span></label>
+              <input
+                id="session-duration"
+                v-model.number="sessionDurationMinutes"
+                type="number"
+                min="1"
+                max="1440"
+                class="form-control"
+                :class="{ 'is-invalid': fieldErrors.sessionDurationMinutes }"
+                :aria-invalid="!!fieldErrors.sessionDurationMinutes"
+                :aria-describedby="fieldErrors.sessionDurationMinutes ? 'session-duration-error' : undefined"
+                required
+                @input="handleFieldChange('sessionDurationMinutes')"
+                @blur="handleFieldChange('sessionDurationMinutes')"
+              />
+              <div v-if="fieldErrors.sessionDurationMinutes" id="session-duration-error" class="invalid-feedback d-block">
+                {{ fieldErrors.sessionDurationMinutes }}
+              </div>
             </div>
           </div>
-          <div class="col-12 col-sm-4">
-            <label class="form-label" for="slot-time">Start time <span v-if="slots.length === 0" class="required-marker" aria-hidden="true">*</span></label>
-            <input
-              id="slot-time"
-              v-model="slotTime"
-              type="time"
-              class="form-control"
-              :class="{ 'is-invalid': fieldErrors.slotTime }"
-              :aria-invalid="!!fieldErrors.slotTime"
-              :aria-describedby="fieldErrors.slotTime ? 'slot-time-error' : undefined"
-              :required="slots.length === 0"
-              @input="handleFieldChange('slotTime')"
-              @blur="handleFieldChange('slotTime')"
-            />
-            <div v-if="fieldErrors.slotTime" id="slot-time-error" class="invalid-feedback d-block">
-              {{ fieldErrors.slotTime }}
-            </div>
-          </div>
-          <div class="col-12 col-sm-4 d-flex align-items-end">
-            <button type="button" class="btn btn-outline-secondary" @click="addSlot">Add start time</button>
-          </div>
-        </div>
-        <div v-if="submitAttempted && fieldErrors.slots" class="text-danger small mb-3" role="alert">
-          {{ fieldErrors.slots }}
-        </div>
 
-        <hr />
-        <h2 class="h6">Stages <span class="required-marker" aria-hidden="true">*</span></h2>
-        <p class="text-muted small">
-          Add at least 1 stage. A course can have up to {{ MAX_STAGES }} stages.
-        </p>
-
-        <div v-for="(s, i) in stages" :key="s.key" class="card card-body mb-3">
-          <div class="d-flex justify-content-between align-items-center mb-2">
-            <strong>Stage {{ i + 1 }}</strong>
-            <button
-              type="button"
-              class="btn btn-sm btn-outline-danger"
-              :disabled="stages.length === 1"
-              @click="removeStage(i)"
-            >
-              Delete stage
-            </button>
-          </div>
-          <label class="form-label" :for="'stage-name-' + i">Stage name <span class="required-marker" aria-hidden="true">*</span></label>
-          <input
-            :id="'stage-name-' + i"
-            v-model="s.name"
-            class="form-control mb-2"
-            :class="{ 'is-invalid': stageTouched[i] && stageErrors[i] }"
-            :aria-invalid="stageTouched[i] && !!stageErrors[i]"
-            :aria-describedby="stageTouched[i] && stageErrors[i] ? 'stage-name-error-' + i : undefined"
-            maxlength="60"
-            placeholder="Stage name"
-            required
-            @input="handleStageChange(i)"
-            @blur="handleStageChange(i)"
-          />
-          <div v-if="stageTouched[i] && stageErrors[i]" :id="'stage-name-error-' + i" class="invalid-feedback d-block mb-2">
-            {{ stageErrors[i] }}
-          </div>
-          <textarea v-model="s.description" class="form-control mb-2" rows="2" maxlength="500" placeholder="Short description" />
-          <MediaPicker v-if="picturesEnabled" v-model="s.media" :max="3" :allow-video="false" label="Stage pictures (optional)" />
-        </div>
-
-        <button
-          type="button"
-          class="btn btn-outline-secondary mb-4"
-          :disabled="stages.length >= MAX_STAGES"
-          @click="addStage"
-        >
-          + Add stage
-        </button>
-
-        <div class="alert alert-light border mb-3">
-          <p class="mb-1">
-            Students pay <strong>{{ creditCost }} credit{{ creditCost === 1 ? '' : 's' }}</strong> when they book.
-            The credit is held until the course is finished.
+          <hr />
+          <h2 class="h6">Start dates and times <span class="required-marker" aria-hidden="true">*</span></h2>
+          <p class="text-muted small">
+            Students book one of these. Add at least one (Singapore time).
           </p>
-          <p class="mb-0">
-            You earn <strong>{{ creditCost }} credit{{ creditCost === 1 ? '' : 's' }}</strong>
-            for each student, once you and the student both confirm the course is finished.
+
+          <ul class="list-group mb-2">
+            <li
+              v-for="(s, i) in slots"
+              :key="s.date + s.time"
+              class="list-group-item d-flex justify-content-between align-items-center"
+            >
+              <span>
+                {{ s.date }} &middot; {{ s.time }}
+                <small v-if="s.taken > 0" class="text-muted ms-2">{{ s.taken }} booked</small>
+              </span>
+              <button
+                type="button"
+                class="btn btn-sm btn-outline-danger"
+                :disabled="s.taken > 0"
+                :title="s.taken > 0 ? 'Students have booked this start time' : ''"
+                @click="removeSlot(i)"
+              >
+                Remove
+              </button>
+            </li>
+            <li v-if="slots.length === 0" class="list-group-item text-muted">No start times yet</li>
+          </ul>
+
+          <div class="row g-2 mb-4">
+            <div class="col-12 col-sm-4">
+              <label class="form-label" for="slot-date">Start date <span v-if="slots.length === 0" class="required-marker" aria-hidden="true">*</span></label>
+              <input
+                id="slot-date"
+                v-model="slotDate"
+                type="date"
+                class="form-control"
+                :class="{ 'is-invalid': fieldErrors.slotDate }"
+                :aria-invalid="!!fieldErrors.slotDate"
+                :aria-describedby="fieldErrors.slotDate ? 'slot-date-error' : undefined"
+                :min="today"
+                :required="slots.length === 0"
+                @input="handleFieldChange('slotDate')"
+                @blur="handleFieldChange('slotDate')"
+              />
+              <div v-if="fieldErrors.slotDate" id="slot-date-error" class="invalid-feedback d-block">
+                {{ fieldErrors.slotDate }}
+              </div>
+            </div>
+            <div class="col-12 col-sm-4">
+              <label class="form-label" for="slot-time">Start time <span v-if="slots.length === 0" class="required-marker" aria-hidden="true">*</span></label>
+              <input
+                id="slot-time"
+                v-model="slotTime"
+                type="time"
+                class="form-control"
+                :class="{ 'is-invalid': fieldErrors.slotTime }"
+                :aria-invalid="!!fieldErrors.slotTime"
+                :aria-describedby="fieldErrors.slotTime ? 'slot-time-error' : undefined"
+                :required="slots.length === 0"
+                @input="handleFieldChange('slotTime')"
+                @blur="handleFieldChange('slotTime')"
+              />
+              <div v-if="fieldErrors.slotTime" id="slot-time-error" class="invalid-feedback d-block">
+                {{ fieldErrors.slotTime }}
+              </div>
+            </div>
+            <div class="col-12 col-sm-4 d-flex align-items-end">
+              <button type="button" class="btn btn-outline-secondary" @click="addSlot">Add start time</button>
+            </div>
+          </div>
+          <div v-if="submitAttempted && fieldErrors.slots" class="text-danger small mb-3" role="alert">
+            {{ fieldErrors.slots }}
+          </div>
+
+          <hr />
+          <h2 class="h6">Stages <span class="required-marker" aria-hidden="true">*</span></h2>
+          <p class="text-muted small">
+            Add at least 1 stage. A course can have up to {{ MAX_STAGES }} stages.
           </p>
-        </div>
 
-        <div v-if="summaryError" class="alert alert-danger" role="alert" aria-live="assertive">
-          {{ summaryError }}
-        </div>
+          <div v-for="(s, i) in stages" :key="s.key" class="card card-body mb-3">
+            <div class="d-flex justify-content-between align-items-center mb-2">
+              <strong>Stage {{ i + 1 }}</strong>
+              <button
+                type="button"
+                class="btn btn-sm btn-outline-danger"
+                :disabled="stages.length === 1"
+                @click="removeStage(i)"
+              >
+                Delete stage
+              </button>
+            </div>
+            <label class="form-label" :for="'stage-name-' + i">Stage name <span class="required-marker" aria-hidden="true">*</span></label>
+            <input
+              :id="'stage-name-' + i"
+              v-model="s.name"
+              class="form-control mb-2"
+              :class="{ 'is-invalid': stageTouched[i] && stageErrors[i] }"
+              :aria-invalid="stageTouched[i] && !!stageErrors[i]"
+              :aria-describedby="stageTouched[i] && stageErrors[i] ? 'stage-name-error-' + i : undefined"
+              maxlength="60"
+              placeholder="Stage name"
+              required
+              @input="handleStageChange(i)"
+              @blur="handleStageChange(i)"
+            />
+            <div v-if="stageTouched[i] && stageErrors[i]" :id="'stage-name-error-' + i" class="invalid-feedback d-block mb-2">
+              {{ stageErrors[i] }}
+            </div>
+            <textarea v-model="s.description" class="form-control mb-2" rows="2" maxlength="500" placeholder="Short description" />
+            <MediaPicker v-if="picturesEnabled" v-model="s.media" :max="3" :allow-video="false" label="Stage pictures (optional)" />
+          </div>
 
-        <div class="d-flex gap-2 flex-wrap">
-          <button class="btn btn-brand" :disabled="saving">
-            {{ saving ? 'Saving...' : 'Save course' }}
-          </button>
-          <button type="button" class="btn btn-outline-secondary" :disabled="saving" @click="router.push('/classes')">
-            Cancel
-          </button>
           <button
-            v-if="isEdit"
             type="button"
-            class="btn btn-outline-danger ms-auto"
-            :disabled="saving"
-            @click="remove"
+            class="btn btn-outline-secondary mb-4"
+            :disabled="stages.length >= MAX_STAGES"
+            @click="addStage"
           >
-            Delete course
+            + Add stage
           </button>
-        </div>
-        <p v-if="isEdit" class="text-muted small mt-2">
-          A course that students have booked cannot be deleted.
-        </p>
-      </form>
-    </template>
+
+          <div class="alert alert-light border mb-3">
+            <p class="mb-1">
+              Students pay <strong>{{ creditCost }} credit{{ creditCost === 1 ? '' : 's' }}</strong> when they book.
+              The credit is held until the course is finished.
+            </p>
+            <p class="mb-0">
+              You earn <strong>{{ creditCost }} credit{{ creditCost === 1 ? '' : 's' }}</strong>
+              for each student, once you and the student both confirm the course is finished.
+            </p>
+          </div>
+
+          <div v-if="summaryError" class="alert alert-danger" role="alert" aria-live="assertive">
+            {{ summaryError }}
+          </div>
+
+          <div class="d-flex gap-2 flex-wrap">
+            <button class="btn btn-brand" :disabled="saving">
+              {{ saving ? 'Saving...' : 'Save course' }}
+            </button>
+            <button type="button" class="btn btn-outline-secondary" :disabled="saving" @click="goToPreviousPage">
+              Cancel
+            </button>
+            <button
+              v-if="isEdit"
+              type="button"
+              class="btn btn-outline-danger ms-auto"
+              :disabled="saving"
+              @click="remove"
+            >
+              Delete course
+            </button>
+          </div>
+          <p v-if="isEdit" class="text-muted small mt-2">
+            A course that students have booked cannot be deleted.
+          </p>
+        </form>
+      </template>
+    </section>
   </main>
 </template>
 

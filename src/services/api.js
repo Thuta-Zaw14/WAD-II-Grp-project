@@ -238,6 +238,19 @@ export async function markReportSeen(id) {
   return response.data
 }
 
+// ---------- Admin: reports from the Reports page ----------
+// every member's report, the one with the newest news first (also says who sent it)
+export async function getAllReports() {
+  const response = await axios.get(API + '/reports', await authConfig())
+  return response.data
+}
+
+// changes = { status, adminNote }; status is 'open', 'in-review' or 'resolved'
+export async function updateReportAsAdmin(id, changes) {
+  const response = await axios.put(API + '/reports/' + encodeURIComponent(id), changes, await authConfig())
+  return response.data
+}
+
 // ---------- Insights ----------
 // Totals worked out by the server: { totalLearners, skills, weekly, invite }
 export async function getInsights() {

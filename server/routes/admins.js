@@ -139,6 +139,34 @@ function profileRowOfMessage(report) {
   }
 }
 
+// A report a member sent from the Reports page about this person ('user' reports only;
+// models/reports.js). It counts against them whatever its status, like a booking report.
+const memberReportStatusText = {
+  open: 'Waiting for a decision',
+  'in-review': 'Being looked at',
+  resolved: 'Resolved',
+}
+
+function isUserReport(report) {
+  return report.type === 'user' && typeof report.targetId === 'string' && report.targetId !== ''
+}
+
+function profileRowOfMemberReport(report) {
+  return {
+    type: 'member',
+    key: 'r_' + report.id,
+    reporterUid: report.reporterUid,
+    reporterName: report.reporterName || '',
+    reporterRole: '',
+    title: report.title || '',
+    what: 'Member report',
+    reason: report.description || '',
+    reportedAt: report.createdAt || '',
+    outcome: memberReportStatusText[report.status] || 'Waiting for a decision',
+    outcomeNote: report.adminNote || '',
+  }
+}
+
 // only the skill NAMES, and only if the profile holds a proper list (old data may not)
 function skillNames(list) {
   const names = []
@@ -173,8 +201,13 @@ router.get('/users', verifyToken, verifyAdmin, async (req, res) => {
     const users = await getAllDocs('users')
     const bookings = await getAllDocs('bookings')
     const messageReports = await getAllDocs('messageReports')
+    const memberReports = await getAllDocs('reports')
 
     const reportCounts = {} // uid -> how many reports were made against them
+    for (const report of memberReports) {
+      if (!isUserReport(report)) continue
+      reportCounts[report.targetId] = (reportCounts[report.targetId] || 0) + 1
+    }
     for (const booking of bookings) {
       if (!hasReport(booking)) continue
       const against = reportOf(booking).againstUid
@@ -232,7 +265,8 @@ router.get('/users/:uid', verifyToken, verifyAdmin, async (req, res) => {
 
     const aboutMessages = await findDocsWhereEquals('messageReports', 'authorUid', snapshot.id)
     const filedByThem = await findDocsWhereEquals('messageReports', 'reporterUid', snapshot.id)
-    if (!aboutMessages.status || !filedByThem.status) {
+    const aboutThem = await findDocsWhereEquals('reports', 'targetId', snapshot.id)
+    if (!aboutMessages.status || !filedByThem.status || !aboutThem.status) {
       return res.status(500).json({ error: 'Could not load the reports.' })
     }
 
@@ -251,6 +285,9 @@ router.get('/users/:uid', verifyToken, verifyAdmin, async (req, res) => {
     }
     for (const report of aboutMessages.docs) {
       if (countsAgainstAuthor(report)) reports.push(profileRowOfMessage(report))
+    }
+    for (const report of aboutThem.docs) {
+      if (isUserReport(report)) reports.push(profileRowOfMemberReport(report))
     }
     reports.sort((a, b) => (a.reportedAt < b.reportedAt ? 1 : -1)) // newest first
 

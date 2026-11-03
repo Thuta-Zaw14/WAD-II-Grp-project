@@ -74,6 +74,13 @@ h1, h2, h3, h4, h5, h6,
   box-shadow: var(--k-shadow);
 }
 
+/* the card the add / edit forms sit in: the same cream and border as the skill cards on Profile
+   (.achievement-card in components/SkillCard.vue) */
+.k-form-card {
+  background: #fffdf8;
+  border-color: #e8dfce;
+}
+
 /* the box at the top of a page: its title and a short line under it */
 .banner {
   background: var(--k-surface-alt);

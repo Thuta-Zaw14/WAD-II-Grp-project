@@ -5,6 +5,7 @@ import { auth } from '@/firebase'
 import { useProfileStore } from '@/stores/profile'
 import NavBar from '@/components/NavBar.vue'
 import BackButton from '@/components/BackButton.vue'
+import { usePreviousPage } from '@/services/previousPage'
 import LoadingText from '@/components/LoadingText.vue'
 import { useToastStore } from '@/stores/toast'
 import { findSkillNameProblem, squeezeSpaces } from '@/services/skillRules'
@@ -12,6 +13,8 @@ import { findSkillNameProblem, squeezeSpaces } from '@/services/skillRules'
 const props = defineProps({ kind: { type: String, required: true } })
 const route = useRoute()
 const router = useRouter()
+// saving and cancelling go back to where you came from (normally Profile)
+const { goBack: goToPreviousPage } = usePreviousPage('/profile')
 const store = useProfileStore()
 const toast = useToastStore()
 
@@ -141,7 +144,7 @@ async function saveSkills() {
   const saved = await store.saveProfile({ [field.value]: updatedSkills })
   if (saved) {
     toast.show('Skills saved.')
-    router.push('/profile')
+    goToPreviousPage()
   } else {
     summaryError.value = store.saveError || 'Could not save your skills. Please try again.'
   }
@@ -160,7 +163,7 @@ async function saveSkills() {
       <button type="button" class="btn btn-sm btn-outline-danger ms-2" @click="loadPage">Try again</button>
     </div>
 
-    <section v-else class="k-card p-4">
+    <section v-else class="k-card k-form-card p-4">
       <p class="eyebrow mb-1">PROFILE SKILLS</p>
       <h1 class="h4 mb-4">{{ pageTitle }}</h1>
 
@@ -226,7 +229,7 @@ async function saveSkills() {
         </div>
 
         <div class="d-flex justify-content-end gap-2 mt-4">
-          <button type="button" class="btn btn-outline-secondary" @click="router.push('/profile')">
+          <button type="button" class="btn btn-outline-secondary" @click="goToPreviousPage">
             Cancel
           </button>
           <button type="submit" class="btn btn-kongsi" :disabled="store.saving">

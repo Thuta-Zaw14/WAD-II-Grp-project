@@ -9,12 +9,15 @@ import SkillsBasicsField from '@/components/SkillsBasicsField.vue'
 import { findTitleProblem } from '@/services/skillRules'
 import NavBar from '@/components/NavBar.vue'
 import BackButton from '@/components/BackButton.vue'
+import { usePreviousPage } from '@/services/previousPage'
 import LoadingText from '@/components/LoadingText.vue'
 import { useToastStore } from '@/stores/toast'
 
 // /learn/:id gives the id of the goal being edited (none = a new one)
 const props = defineProps({ id: { type: String, default: null } })
 const router = useRouter()
+// saving and cancelling go back to where you came from (normally Profile)
+const { goBack: goToPreviousPage } = usePreviousPage('/profile')
 const store = useProfileStore()
 const toast = useToastStore()
 const isEdit = computed(() => !!props.id)
@@ -137,7 +140,7 @@ async function save() {
       await createGoal(data)
     }
     toast.show('Learning goal saved.')
-    router.push('/profile')
+    goToPreviousPage()
   } catch (err) {
     await deleteMany(uploaded)
     error.value = errorText(err)
@@ -153,7 +156,7 @@ async function remove() {
     const result = await deleteGoal(props.id)
     await deleteMany(result.removedPaths)
     toast.show('Removed from your learning list.')
-    router.push('/profile')
+    goToPreviousPage()
   } catch (err) {
     error.value = errorText(err)
   }
@@ -164,7 +167,7 @@ async function remove() {
   <NavBar />
   <main class="container py-4" style="max-width: 760px">
     <BackButton fallback="/profile" class="mb-3" />
-    <section class="k-card p-4">
+    <section class="k-card k-form-card p-4">
       <h1 class="h4 mb-3">
         {{ isEdit ? 'Edit skill I want to learn' : 'Add a skill I want to learn' }}
       </h1>
@@ -223,7 +226,7 @@ async function remove() {
           <button class="btn btn-brand" :disabled="saving">
             {{ saving ? 'Saving...' : 'Save goal' }}
           </button>
-          <button type="button" class="btn btn-outline-secondary" :disabled="saving" @click="router.push('/profile')">
+          <button type="button" class="btn btn-outline-secondary" :disabled="saving" @click="goToPreviousPage">
             Cancel
           </button>
           <button v-if="isEdit" type="button" class="btn btn-outline-danger ms-auto" :disabled="saving" @click="remove">
