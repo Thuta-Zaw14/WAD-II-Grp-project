@@ -67,6 +67,10 @@ The frontend runs on `http://localhost:5173`, the API on `http://localhost:3000/
 Copy `.env.example` to `.env` and fill in the Firebase values. The server needs
 its own Firebase Admin credentials (see `server/config/firebaseAdmin.js`).
 
+The meeting-place search on the teach form goes through the server to OneMap, Singapore's
+map service (`server/models/places.js`). It needs no account. If OneMap ever asks for one,
+see `server/.env.example`.
+
 ### Folder map
 
 ```

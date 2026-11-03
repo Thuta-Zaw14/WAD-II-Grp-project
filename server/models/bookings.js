@@ -216,6 +216,7 @@ export async function bookSlot(uid, offerId, slotId) {
       mode: offer.mode || '',
       region: offer.region || '',
       place: offer.place || '',
+      address: offer.address || '', // the full address, for courses whose place was picked on the map
       stageNames: stageNames,
       stageProgress: stageNames.map(() => ({
         reflection: '',

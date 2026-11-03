@@ -124,6 +124,15 @@ export async function deleteOffer(id) {
   return response.data
 }
 
+// The meeting-place search on the teach form (the server asks OneMap, Singapore's map service).
+// typed = a postal code, building or street -> [{ name, address, postal, lat, lng, region }]
+export async function searchPlaces(typed) {
+  const config = await authConfig()
+  config.params = { q: typed }
+  const response = await axios.get(API + '/places/search', config)
+  return response.data
+}
+
 // ---------- Skills I want to learn ----------
 export async function getMyGoals() {
   const response = await axios.get(API + '/learn-goals/mine', await authConfig())

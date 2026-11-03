@@ -4,18 +4,18 @@
 // lists and the frontend loads them from GET /api/options.
 export const categoryList = ['Sports', 'Creative', 'Music', 'Tech', 'Others']
 
-// Same regions as the filter on the home page
+// Same regions as the filter on the Courses page
 export const regionList = ['Central', 'West', 'East', 'North']
 
-// Roughly the middle of each region. A physical class gets its map pin here
-// (plus a small random shift so pins in one region do not sit on top of each
-// other). The pin is approximate on purpose: the exact place is only written
-// as text, e.g. "Bishan Library".
-export const regionCentres = {
-  Central: { lat: 1.3526, lng: 103.8352 },
-  West: { lat: 1.3396, lng: 103.7066 },
-  East: { lat: 1.3547, lng: 103.94 },
-  North: { lat: 1.437, lng: 103.7865 },
+// The region a point on the map is in, from rough cut-offs (not official borders).
+// A physical class gets its region from its meeting place this way (see routes/offers.js).
+// The Courses page uses the same cut-offs to say which region you are in (getRegion in
+// CoursesPage.vue), so change both together.
+export function regionOfPoint(lat, lng) {
+  if (lat > 1.4) return 'North'
+  if (lng < 103.75) return 'West'
+  if (lng > 103.9) return 'East'
+  return 'Central'
 }
 
 // Skills offered as suggestions while someone types one (the profile page reads them

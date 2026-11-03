@@ -82,6 +82,53 @@ const categoryColors = {
   Tech: '#4a7c59',
 }
 
+// ---------- Near me ----------
+const userPos = ref(null) // { lat, lng } once we know where you are
+const userRegion = ref('')
+const locationError = ref('')
+let youMarker = null
+
+// Work out the region from coordinates (rough cut-offs, not official borders).
+// The server gives each course its region with the same cut-offs (regionOfPoint in
+// server/config/skills.js), so change both together.
+function getRegion(lat, lng) {
+  if (lat > 1.4) return 'North'
+  if (lng < 103.75) return 'West'
+  if (lng > 103.9) return 'East'
+  return 'Central'
+}
+
+// Straight-line distance in km. 1 degree is about 111 km (close enough for Singapore)
+function distanceKm(from, to) {
+  const dLat = to.lat - from.lat
+  const dLng = to.lng - from.lng
+  return Math.sqrt(dLat * dLat + dLng * dLng) * 111
+}
+
+function findMe() {
+  locationError.value = ''
+  navigator.geolocation.getCurrentPosition(
+    (pos) => {
+      const lat = pos.coords.latitude
+      const lng = pos.coords.longitude
+      userPos.value = { lat, lng }
+      userRegion.value = getRegion(lat, lng)
+
+      if (youMarker) youMarker.remove()
+      youMarker = L.circleMarker([lat, lng], { radius: 8, color: 'blue' }).addTo(map)
+    },
+    () => {
+      locationError.value = 'Could not get your location. Allow location access in your browser.'
+    }
+  )
+}
+
+function clearLocation() {
+  userPos.value = null
+  userRegion.value = ''
+  youMarker.remove()
+}
+
 // ---------- The list (also used for the map pins) ----------
 const filteredSkills = computed(() => {
   const results = []
@@ -93,8 +140,20 @@ const filteredSkills = computed(() => {
     const regionMatches = selectedRegion.value === 'All' || item.region === selectedRegion.value
 
     if (textMatches && categoryMatches && regionMatches) {
-      results.push(item)
+      // online classes have no pin, so they have no distance
+      const hasPin = typeof item.lat === 'number' && typeof item.lng === 'number'
+      const distance = userPos.value && hasPin ? distanceKm(userPos.value, item) : null
+      results.push({ ...item, distance })
     }
+  }
+
+  // Closest first, once we know where you are
+  if (userPos.value) {
+    results.sort((a, b) => {
+      if (a.distance === null) return 1 // online classes go last
+      if (b.distance === null) return -1
+      return a.distance - b.distance
+    })
   }
 
   return results
@@ -105,26 +164,93 @@ const mapEl = ref(null)
 let map = null
 let pinLayer = null
 
+// Courses that meet at the same place share one pin. A course saved before the meeting place
+// was picked on a map only has a rough pin somewhere in its region, so it is drawn paler.
+// -> [{ lat, lng, exact, place, address, courses: [...] }]
+const pinGroups = computed(() => {
+  const groups = []
+  for (const s of filteredSkills.value) {
+    if (typeof s.lat !== 'number' || typeof s.lng !== 'number') continue // online class: no pin
+    let group = null
+    for (const g of groups) {
+      if (g.lat === s.lat && g.lng === s.lng) group = g
+    }
+    if (group === null) {
+      group = { lat: s.lat, lng: s.lng, exact: s.placeVerified === true, place: s.place, address: s.address || '', courses: [] }
+      groups.push(group)
+    }
+    group.courses.push(s)
+  }
+  return groups
+})
+
+// Leaflet reads a plain text tooltip as HTML, so the words go into an element instead.
+// That way a course title such as "<img ...>" is only ever shown, never run.
+function tooltipText(words) {
+  const span = document.createElement('span')
+  span.textContent = words
+  return span
+}
+
 function drawPins() {
   if (!pinLayer) return // the map is not ready yet
   pinLayer.clearLayers()
 
-  for (const s of filteredSkills.value) {
-    if (typeof s.lat !== 'number' || typeof s.lng !== 'number') continue // online class: no pin
-    const pin = L.circleMarker([s.lat, s.lng], {
-      radius: 10,
-      color: 'white',
-      fillColor: categoryColors[s.category],
-      fillOpacity: 1,
-    })
-    pin.bindTooltip(s.title)
-    pin.on('click', () => openBooking(s)) // clicking a pin opens the booking popup
+  for (const group of pinGroups.value) {
+    const first = group.courses[0]
+    let pin = null
+    if (group.courses.length === 1) {
+      pin = L.circleMarker([group.lat, group.lng], {
+        radius: 10,
+        color: 'white',
+        fillColor: categoryColors[first.category],
+        fillOpacity: group.exact ? 1 : 0.45,
+      })
+      pin.bindTooltip(tooltipText(first.title + (group.exact ? '' : ' (rough area only)')))
+      pin.on('click', () => openBooking(first)) // clicking a pin opens the booking popup
+    } else {
+      // several courses meet here: one pin with the number, which lists them
+      pin = L.marker([group.lat, group.lng], {
+        icon: L.divIcon({ className: 'place-pin', html: '<span>' + group.courses.length + '</span>', iconSize: [30, 30] }),
+        keyboard: false,
+      })
+      pin.bindTooltip(tooltipText(group.courses.length + ' courses at ' + group.place))
+      pin.on('click', () => openPlace(group))
+    }
     pin.addTo(pinLayer)
   }
 }
 
 // Redraw the pins whenever the list changes
-watch(filteredSkills, drawPins)
+watch(pinGroups, drawPins)
+
+// ---------- Several courses at one place (popup) ----------
+const placeKey = ref('') // "lat,lng" of the place whose courses are listed ('' = popup closed)
+
+const placeGroup = computed(() => {
+  for (const g of pinGroups.value) {
+    if (g.lat + ',' + g.lng === placeKey.value) return g
+  }
+  return null
+})
+
+function openPlace(group) {
+  placeKey.value = group.lat + ',' + group.lng
+}
+
+function closePlace() {
+  placeKey.value = ''
+}
+
+function bookFromPlace(skill) {
+  closePlace()
+  openBooking(skill)
+}
+
+function detailsFromPlace(skill) {
+  closePlace()
+  openDetails(skill)
+}
 
 onMounted(() => {
   map = L.map(mapEl.value).setView([1.3521, 103.8198], 11) // middle of Singapore
@@ -337,8 +463,19 @@ function resetFilters() {
         >{{ r }}</button>
       </div>
 
-      <p v-if="selectedCategory !== 'All' || selectedRegion !== 'All'" class="small mb-0">
-        <a href="#" @click.prevent="resetFilters">Reset filters</a>
+      <p class="small mb-0">
+        <a v-if="!userPos" href="#" @click.prevent="findMe">Sort by distance from me</a>
+        <template v-else>
+          <span class="text-muted">You're in the {{ userRegion }} region. Closest first.</span>
+          <a href="#" class="ms-2" @click.prevent="clearLocation">Clear</a>
+        </template>
+        <a
+          v-if="selectedCategory !== 'All' || selectedRegion !== 'All'"
+          href="#"
+          class="ms-3"
+          @click.prevent="resetFilters"
+        >Reset filters</a>
+        <span v-if="locationError" class="ms-2 text-danger">{{ locationError }}</span>
       </p>
     </div>
 
@@ -362,6 +499,7 @@ function resetFilters() {
                   <span class="dot" :style="{ background: categoryColors[s.category] }"></span>{{ s.category }}
                 </span>
                 <span v-if="hasBooked(s)" class="badge rounded-pill text-bg-success">Booked</span>
+                <small v-else-if="s.distance !== null" class="text-muted">{{ s.distance.toFixed(1) }} km away</small>
               </div>
 
               <h2 class="h5 mb-2">{{ s.title }}</h2>
@@ -431,6 +569,13 @@ function resetFilters() {
         <div class="modal-body">
           <p v-if="detailsSkill.description" class="details-description">{{ detailsSkill.description }}</p>
 
+          <div v-if="detailsSkill.mode === 'physical'" class="mb-3">
+            <div class="fw-bold mb-1">Where</div>
+            <p class="mb-0">{{ detailsSkill.place }}</p>
+            <p v-if="detailsSkill.address" class="small text-muted mb-0">{{ detailsSkill.address }}</p>
+            <p v-else class="small text-muted mb-0">{{ detailsSkill.region }} region. Its pin on the map only shows the rough area.</p>
+          </div>
+
           <div class="fw-bold mb-2">Stages</div>
           <!-- hover (or tab to) a stage to read its description -->
           <div v-if="detailsSkill.stages && detailsSkill.stages.length > 0" class="d-flex flex-column gap-2">
@@ -452,6 +597,49 @@ function resetFilters() {
           <button class="btn btn-brand" @click="bookFromDetails">
             {{ hasBooked(detailsSkill) ? 'View booking' : 'Book a session' }}
           </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Several courses at one place: opened from a pin with a number -->
+  <div
+    v-if="placeGroup"
+    class="modal d-block"
+    style="background: rgba(0, 0, 0, 0.5)"
+    @click.self="closePlace"
+  >
+    <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable">
+      <div class="modal-content">
+        <div class="modal-header modal-banner">
+          <div class="min-w-0">
+            <h2 class="h5 mb-1">{{ placeGroup.place }}</h2>
+            <small v-if="placeGroup.address">{{ placeGroup.address }}</small>
+          </div>
+          <button class="btn-close" aria-label="Close" @click="closePlace"></button>
+        </div>
+
+        <div class="modal-body">
+          <p class="small text-muted">{{ placeGroup.courses.length }} courses meet here.</p>
+          <div
+            v-for="s in placeGroup.courses"
+            :key="s.id"
+            class="place-course d-flex justify-content-between align-items-center flex-wrap gap-2"
+          >
+            <div class="min-w-0">
+              <strong class="d-block">{{ s.title }}</strong>
+              <small class="text-muted">
+                Taught by {{ s.teacherName }} &middot; {{ s.creditCost }} credit{{ s.creditCost === 1 ? '' : 's' }}
+              </small>
+            </div>
+            <div class="d-flex gap-2">
+              <button class="btn btn-sm btn-outline-secondary" @click="detailsFromPlace(s)">Details</button>
+              <button v-if="isMine(s)" class="btn btn-sm btn-outline-secondary" disabled>Your course</button>
+              <button v-else class="btn btn-sm btn-brand" @click="bookFromPlace(s)">
+                {{ hasBooked(s) ? 'View booking' : 'Book' }}
+              </button>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -636,6 +824,32 @@ function resetFilters() {
   border: 1px solid var(--k-border);
   border-radius: var(--k-radius);
   overflow: hidden;
+}
+
+/* A pin with a number: several courses meet at this place. Leaflet makes this element itself,
+   so it does not get this page's scoped mark, and :deep() is needed to reach it. */
+.map-box :deep(.place-pin) {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid white;
+  border-radius: 50%;
+  background: var(--k-accent);
+  color: var(--k-on-accent);
+  font-size: 13px;
+  font-weight: 700;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+}
+
+/* one course in the "courses at this place" popup */
+.place-course {
+  padding: 10px 0;
+  border-top: 1px solid var(--k-border);
+}
+
+.min-w-0 {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 /* the padding leaves room for a card to rise without being cut off */

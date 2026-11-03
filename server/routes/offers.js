@@ -7,7 +7,7 @@ import { slotMoment } from '../models/bookingRules.js'
 import { publicOffer, publicBooking } from '../models/publicView.js'
 import { bookSlot } from '../models/bookings.js'
 import { deleteDiscussion, isValidId } from '../models/discussions.js'
-import { regionList, regionCentres } from '../config/skills.js'
+import { verifyPlace } from '../models/places.js'
 import { MAX_STAGES, calcCreditCost } from '../config/credits.js'
 
 const router = express.Router()
@@ -84,9 +84,10 @@ function findProblem(body, uid, user, existing) {
   if (!['standard', 'high_risk'].includes(body.difficulty)) return 'Choose a difficulty.'
 
   if (body.mode === 'physical') {
-    if (!regionList.includes(body.region)) return 'Please pick a region.'
-    if (typeof body.place !== 'string' || body.place.trim() === '') return 'Please enter a public meeting place.'
-    if (body.place.trim().length > 100) return 'The meeting place must be 100 characters or fewer.'
+    // the place itself is checked with OneMap in findMeetingPlace below
+    if (typeof body.location !== 'object' || body.location === null) {
+      return 'Please search for the meeting place and pick it from the list.'
+    }
     if (!['provided', 'bring', 'not_required'].includes(body.equipmentOption)) return 'Choose an equipment option.'
   }
 
@@ -177,26 +178,53 @@ function findSlotProblem(slots, capacity, existing) {
   return ''
 }
 
-function buildOffer(body, uid, user, existing) {
+// ---------- Where a physical class meets ----------
+
+// true if the browser sent back the course's saved place unchanged
+function samePlace(existing, picked) {
+  if (typeof picked !== 'object' || picked === null) return false
+  return picked.lat === existing.lat && picked.lng === existing.lng && picked.address === existing.address
+}
+
+// The browser sends the place picked in the search box: { name, address, postal, lat, lng }.
+// The server checks it with OneMap and keeps OneMap's copy, so the pin is exact and the place is
+// real. A course being edited keeps its checked place without asking OneMap again.
+// -> { place } (place is null for an online class) or { status, error }
+async function findMeetingPlace(body, existing) {
+  if (body.mode !== 'physical') return { place: null }
+
+  if (existing && existing.placeVerified === true && samePlace(existing, body.location)) {
+    return {
+      place: {
+        name: existing.place,
+        address: existing.address,
+        postal: existing.postal || '',
+        lat: existing.lat,
+        lng: existing.lng,
+        region: existing.region,
+      },
+    }
+  }
+
+  let place = null
+  try {
+    place = await verifyPlace(body.location)
+  } catch (err) {
+    console.log('meeting place check failed:', err.message)
+    return { status: 503, error: 'We could not check the meeting place right now. Please try again in a minute.' }
+  }
+  if (place === null) {
+    return { status: 400, error: 'We could not find that meeting place in Singapore. Please search for it again and pick it from the list.' }
+  }
+  return { place: place }
+}
+
+// place = the checked meeting place from findMeetingPlace (null for an online class)
+function buildOffer(body, uid, user, existing, place) {
   const skill = findProfileSkill(user, 'skillsTeach', body.skill)
   const physical = body.mode === 'physical'
   const equipmentOption = physical ? body.equipmentOption : 'not_required'
   const difficulty = body.difficulty
-
-  // the pin on the home page map: the region's middle, shifted a little.
-  // Keep the old pin when the region has not changed.
-  let lat = null
-  let lng = null
-  if (physical) {
-    if (existing && existing.region === body.region && existing.lat) {
-      lat = existing.lat
-      lng = existing.lng
-    } else {
-      const centre = regionCentres[body.region]
-      lat = centre.lat + (Math.random() - 0.5) * 0.03
-      lng = centre.lng + (Math.random() - 0.5) * 0.03
-    }
-  }
 
   const stages = []
   for (const stage of body.stages) {
@@ -218,10 +246,14 @@ function buildOffer(body, uid, user, existing) {
     skill: skill.name,
     category: skill.category,
     mode: body.mode,
-    region: physical ? body.region : '',
-    place: physical ? body.place.trim() : '',
-    lat: lat,
-    lng: lng,
+    // all from OneMap (see findMeetingPlace): the browser's own numbers are never stored
+    region: place ? place.region : '',
+    place: place ? place.name : '',
+    address: place ? place.address : '',
+    postal: place ? place.postal : '',
+    lat: place ? place.lat : null, // the exact pin on the Courses page map
+    lng: place ? place.lng : null,
+    placeVerified: place !== null, // false for online classes, and for courses saved before the map search
     equipmentOption: equipmentOption,
     equipmentProvided: equipmentOption === 'provided',
     difficulty: difficulty,
@@ -298,7 +330,12 @@ router.post('/', verifyToken, async (req, res) => {
     return res.status(409).json({ error: 'You already have a course with this title.' })
   }
 
-  const offer = buildOffer(req.body, req.user.uid, teacher.user, null)
+  const meeting = await findMeetingPlace(req.body, null)
+  if (meeting.error) {
+    return res.status(meeting.status).json({ error: meeting.error })
+  }
+
+  const offer = buildOffer(req.body, req.user.uid, teacher.user, null, meeting.place)
   offer.teacherName = teacher.user.name.trim()
   offer.createdAt = new Date().toISOString()
   offer.updatedAt = offer.createdAt
@@ -394,7 +431,12 @@ router.put('/:id', verifyToken, async (req, res) => {
     return res.status(409).json({ error: 'You already have a course with this title.' })
   }
 
-  const offer = buildOffer(req.body, req.user.uid, teacher.user, existing)
+  const meeting = await findMeetingPlace(req.body, existing)
+  if (meeting.error) {
+    return res.status(meeting.status).json({ error: meeting.error })
+  }
+
+  const offer = buildOffer(req.body, req.user.uid, teacher.user, existing, meeting.place)
   offer.teacherName = teacher.user.name.trim()
   offer.updatedAt = new Date().toISOString()
 

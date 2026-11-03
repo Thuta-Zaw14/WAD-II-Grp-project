@@ -79,6 +79,7 @@ export function publicBooking(booking, uid, now = new Date()) {
     mode: booking.mode,
     region: booking.region,
     place: booking.place,
+    address: booking.address || '',
     teacherName: booking.teacherName,
     learnerName: booking.learnerName,
     otherUid: role === 'learner' ? booking.teacherUid : booking.learnerUid,
