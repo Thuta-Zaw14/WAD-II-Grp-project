@@ -114,6 +114,8 @@ export function publicBooking(booking, uid, now = new Date()) {
     messageCount: messageCount,
     chatOpen: booking.status === 'booked' || booking.status === 'disputed', // can new messages still be written?
     unreadChat: role !== '' && messageCount > myReadN && booking.lastMessageBy !== uid, // something new from the other person
+    // how many of those I have not opened yet (writing a message also marks everything before it read)
+    unreadCount: role !== '' ? Math.max(0, messageCount - myReadN) : 0,
   }
 }
 

@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import { auth } from '../firebase'
 import BookingChat from '../components/BookingChat.vue'
 import NavBar from '../components/NavBar.vue'
+import BackButton from '../components/BackButton.vue'
 
 // The private chat of one booking, at /chat/<booking id>. The id in the address arrives as a prop
 // (the route has props: true). The chat itself is the BookingChat component; this page adds the
@@ -35,19 +36,15 @@ const statusLabels = {
 }
 
 const heading = computed(() => (info.value ? 'Chat with ' + info.value.otherName : 'Chat'))
-
-function goBack() {
-  router.push('/classes')
-}
 </script>
 
 <template>
   <NavBar />
 
   <div class="container py-4 chat-container">
-    <a href="#" class="back-link small" @click.prevent="goBack">&larr; Back to My classes</a>
+    <BackButton fallback="/classes" />
 
-    <div class="p-4 mt-2 mb-3 banner">
+    <div class="p-4 mt-3 mb-3 banner">
       <h1 class="h4 mb-1">{{ heading }}</h1>
       <p v-if="info" class="mb-0">
         {{ info.title }}
@@ -66,11 +63,6 @@ function goBack() {
 </template>
 
 <style scoped>
-.back-link {
-  color: var(--k-muted);
-  text-decoration: none;
-}
-
 /* a chat reads better in a column than stretched across a wide screen */
 .chat-container {
   max-width: 760px;

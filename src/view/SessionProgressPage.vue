@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { auth } from '@/firebase'
 import { useBookingsStore } from '@/stores/bookings'
 import NavBar from '@/components/NavBar.vue'
+import BackButton from '@/components/BackButton.vue'
 import LoadingText from '@/components/LoadingText.vue'
 
 const route = useRoute()
@@ -112,9 +113,7 @@ function stageStatus(stage) {
 <template>
   <NavBar />
   <main class="container py-4 progress-page">
-    <button class="btn btn-link px-0 mb-3" type="button" @click="router.push('/classes')">
-      &larr; Back to My classes
-    </button>
+    <BackButton fallback="/classes" class="mb-3" />
 
     <LoadingText v-if="loading" text="Loading course progress..." />
     <div v-else-if="loadError" class="alert alert-danger" role="alert">
