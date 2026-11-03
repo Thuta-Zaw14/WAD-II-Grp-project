@@ -3,13 +3,14 @@ import { createPinia } from 'pinia'
 
 import 'bootstrap/dist/css/bootstrap.min.css'
 import './assets/theme.css'
-import { onAuthStateChanged } from 'firebase/auth'
+import { onAuthStateChanged, signOut } from 'firebase/auth'
 import App from './App.vue'
 import router from './router'
 import { auth } from './firebase'
 import { useProfileStore } from './stores/profile'
 import { useOffersStore } from './stores/offers'
 import { useBookingsStore } from './stores/bookings'
+import { startIdleWatch, stopIdleWatch } from './services/idleLogout'
 
 const app = createApp(App)
 
@@ -27,6 +28,15 @@ onAuthStateChanged(auth, (user) => {
     useBookingsStore().reset()
   }
   lastUid = uid
+
+  // log people out after a while without clicking (the stores are then cleared just above)
+  if (user) startIdleWatch({ onLogout: logOutForInactivity })
+  else stopIdleWatch()
 })
+
+async function logOutForInactivity() {
+  await signOut(auth)
+  router.push({ path: '/login', query: { reason: 'idle' } })
+}
 
 app.mount('#app')
