@@ -1,5 +1,6 @@
 <script setup>
 import ToastMessage from './components/ToastMessage.vue'
+import IdleWarning from './components/IdleWarning.vue'
 </script>
 
 <template>
@@ -9,6 +10,8 @@ import ToastMessage from './components/ToastMessage.vue'
   </RouterView>
   <!-- the short "Saved" style messages, shown on top of whatever page is open -->
   <ToastMessage />
+  <!-- "Still there?" after a while without clicking (see services/idleLogout.js) -->
+  <IdleWarning />
 </template>
 
 <style>

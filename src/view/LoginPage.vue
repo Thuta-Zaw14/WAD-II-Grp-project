@@ -8,6 +8,8 @@ import {
 } from 'firebase/auth'
 import { useRouter, useRoute } from 'vue-router'
 import { checkAdmin, verifyResetCode, resetPassword, errorText } from '../services/api'
+import { markActive } from '../services/idleLogout'
+import { IDLE_LOGOUT_MINUTES } from '../config'
 import LogoMark from '../components/LogoMark.vue'
 
 import loginImg from '../assets/login.jpg'
@@ -39,6 +41,11 @@ const isError = ref(false)
 const email = ref('')
 const password = ref('')
 const message = ref('')
+
+// set when main.js logged someone out for being away too long (services/idleLogout.js)
+const idleNotice = route.query.reason === 'idle'
+  ? 'You were logged out after ' + IDLE_LOGOUT_MINUTES + ' minutes without activity. Please log in again.'
+  : ''
 
 function switchMode() {
   mode.value = isSignup.value ? 'login' : 'signup'
@@ -126,6 +133,7 @@ async function saveNewPassword() {
 async function submit() {
   isError.value = false
   message.value = 'Trying...'
+  markActive() // start the inactivity clock afresh, before the login starts it watching
   try {
     if (isSignup.value) {
       const result = await createUserWithEmailAndPassword(auth, email.value, password.value)
@@ -304,6 +312,8 @@ async function goToStartPage() {
           <!-- Login and Sign up -->
           <form v-else :key="mode" class="card border-0 shadow w-100 p-4 p-md-5" @submit.prevent="submit">
             <h2 class="h4 mb-4">{{ isSignup ? 'Sign up' : 'Login' }}</h2>
+
+            <p v-if="!isSignup && idleNotice" class="alert alert-info small py-2 mb-3" role="status">{{ idleNotice }}</p>
 
             <p v-if="isSignup && inviteCode !== ''" class="small text-muted mb-3">
               A friend invited you to Kongsi. Sign up to start teaching and learning.
