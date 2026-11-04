@@ -133,6 +133,27 @@ async function saveNewPassword() {
   reset.busy = false
 }
 
+// What Firebase's error codes mean, in plain words. A wrong password and an unknown email give
+// the same message, so nobody can use the form to find out which emails have an account.
+// Firebase allows one account per email, so signing up with a taken one (an admin's too) fails.
+// Its only password rule (no custom policy is set for the project) is a minimum of 6 characters.
+const loginErrors = {
+  'auth/invalid-credential': 'Incorrect email or password. Please try again.',
+  'auth/wrong-password': 'Incorrect email or password. Please try again.',
+  'auth/user-not-found': 'Incorrect email or password. Please try again.',
+  'auth/invalid-email': 'Please enter a valid email address.',
+  'auth/missing-password': 'Please enter your password.',
+  'auth/email-already-in-use': 'This email is already registered. Please try a different email.',
+  'auth/weak-password': 'Your password must be at least 6 characters long.',
+  'auth/user-disabled': 'This account has been disabled. Please contact the Kongsi team.',
+  'auth/too-many-requests': 'Too many attempts. Please wait a few minutes and try again.',
+  'auth/network-request-failed': "We couldn't reach the server. Please check your internet connection.",
+}
+
+function loginErrorText(error) {
+  return loginErrors[error.code] || 'Something went wrong. Please try again.'
+}
+
 async function submit() {
   isError.value = false
   message.value = 'Trying...'
@@ -150,15 +171,7 @@ async function submit() {
     }
   } catch (error) {
     isError.value = true
-    // Firebase allows one account per email, so signing up with a taken one (an admin's too) fails here.
-    // Its only password rule (no custom policy is set for the project) is a minimum of 6 characters.
-    if (error.code === 'auth/email-already-in-use') {
-      message.value = 'This email is already registered. Please try a different email.'
-    } else if (error.code === 'auth/weak-password') {
-      message.value = 'Your password must be at least 6 characters long.'
-    } else {
-      message.value = 'Failed: ' + error.code
-    }
+    message.value = loginErrorText(error)
   }
 }
 
@@ -169,7 +182,6 @@ async function goToStartPage() {
 
   try {
     const answer = await checkAdmin()
-    console.log('Admin response:', answer)
     admin = answer?.isAdmin === true
     if (admin) {
       await setPersistence(auth, browserSessionPersistence)
@@ -182,7 +194,7 @@ async function goToStartPage() {
     if (err.response && err.response.status === 403) {
       await signOut(auth)
       isError.value = true
-      message.value = 'Failed: ' + errorText(err)
+      message.value = errorText(err) // e.g. "Your account has been suspended."
       return
     } 
   }

@@ -5,4 +5,6 @@
 // replace this with a random code per request that is emailed to the person and expires.
 export const TEST_RESET_CODE = '123456'
 
-export const MIN_PASSWORD_LENGTH = 8 // the same as the password form on the profile page
+// The same 6 characters as everywhere else: sign-up and the profile's change-password form
+// (Firebase's own minimum) and the reset form on the login page.
+export const MIN_PASSWORD_LENGTH = 6

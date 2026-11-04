@@ -44,7 +44,7 @@ router.post('/verify', async (req, res) => {
 router.post('/', async (req, res) => {
   const password = typeof req.body.password === 'string' ? req.body.password : ''
   if (password.length < MIN_PASSWORD_LENGTH) {
-    return res.status(400).json({ error: 'Use at least ' + MIN_PASSWORD_LENGTH + ' characters.' })
+    return res.status(400).json({ error: 'Your password must be at least ' + MIN_PASSWORD_LENGTH + ' characters long.' })
   }
   if (password.length > 128) {
     return res.status(400).json({ error: 'The password must be 128 characters or fewer.' })
