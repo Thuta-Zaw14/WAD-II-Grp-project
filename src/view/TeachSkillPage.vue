@@ -47,8 +47,6 @@ const oldPlace = ref('') // an older course's place, typed by hand before the ma
 const equipmentOption = ref('not_required')
 const difficulty = ref('standard')
 const maxCapacity = ref(5)
-const durationWeeks = ref(4)
-const lessonsPerWeek = ref(1)
 const sessionDurationMinutes = ref(60)
 const stages = ref([newStage()])
 const slots = ref([]) // [{ date, time, taken }]  taken = students already booked (edit only)
@@ -70,8 +68,6 @@ const fieldErrors = reactive({
   title: '',
   location: '',
   maxCapacity: '',
-  durationWeeks: '',
-  lessonsPerWeek: '',
   sessionDurationMinutes: '',
   slotDate: '',
   slotTime: '',
@@ -82,8 +78,6 @@ const touched = reactive({
   title: false,
   location: false,
   maxCapacity: false,
-  durationWeeks: false,
-  lessonsPerWeek: false,
   sessionDurationMinutes: false,
   slotDate: false,
   slotTime: false,
@@ -111,8 +105,6 @@ const fieldLabels = {
   title: 'Title',
   location: 'Meeting place',
   maxCapacity: 'Maximum students',
-  durationWeeks: 'Course length',
-  lessonsPerWeek: 'Lessons per week',
   sessionDurationMinutes: 'Session duration',
 }
 
@@ -129,16 +121,6 @@ function fieldProblem(field) {
     return Number.isInteger(maxCapacity.value) && maxCapacity.value >= 1 && maxCapacity.value <= 50
       ? ''
       : 'Maximum students must be a whole number from 1 to 50.'
-  }
-  if (field === 'durationWeeks') {
-    return Number.isInteger(durationWeeks.value) && durationWeeks.value >= 1 && durationWeeks.value <= 52
-      ? ''
-      : 'Course length must be a whole number of weeks (1-52).'
-  }
-  if (field === 'lessonsPerWeek') {
-    return Number.isInteger(lessonsPerWeek.value) && lessonsPerWeek.value >= 1 && lessonsPerWeek.value <= 7
-      ? ''
-      : 'Lessons per week must be a whole number (1-7).'
   }
   if (field === 'sessionDurationMinutes') {
     return Number.isInteger(sessionDurationMinutes.value) && sessionDurationMinutes.value >= 1 && sessionDurationMinutes.value <= 1440
@@ -288,8 +270,6 @@ function fillForm(offer) {
   equipmentOption.value = offer.equipmentOption || 'not_required'
   difficulty.value = offer.difficulty || 'standard'
   maxCapacity.value = offer.maxCapacity || 1
-  durationWeeks.value = offer.durationWeeks || 4
-  lessonsPerWeek.value = offer.lessonsPerWeek || 1
   sessionDurationMinutes.value = offer.sessionDurationMinutes || 60
   stages.value = (offer.stages || []).map((st) => newStage(st))
   if (stages.value.length === 0) stages.value = [newStage()]
@@ -391,8 +371,6 @@ async function save() {
       equipmentOption: physical.value ? equipmentOption.value : 'not_required',
       difficulty: difficulty.value,
       maxCapacity: maxCapacity.value,
-      durationWeeks: durationWeeks.value,
-      lessonsPerWeek: lessonsPerWeek.value,
       sessionDurationMinutes: sessionDurationMinutes.value,
       stages: stagesOut,
       slots: slotsOut,
@@ -574,16 +552,6 @@ async function remove() {
 
           <div class="row g-3 mb-3">
             <div class="col-12 col-sm-4">
-              <label class="form-label" for="weeks">Course length (weeks) <span class="required-marker" aria-hidden="true">*</span></label>
-              <input id="weeks" v-model.number="durationWeeks" type="number" min="1" max="52" class="form-control" :class="{ 'is-invalid': fieldErrors.durationWeeks }" :aria-invalid="!!fieldErrors.durationWeeks" :aria-describedby="fieldErrors.durationWeeks ? 'weeks-error' : undefined" required @input="handleFieldChange('durationWeeks')" @blur="handleFieldChange('durationWeeks')" />
-              <div v-if="fieldErrors.durationWeeks" id="weeks-error" class="invalid-feedback d-block">{{ fieldErrors.durationWeeks }}</div>
-            </div>
-            <div class="col-12 col-sm-4">
-              <label class="form-label" for="lessons">Lessons per week <span class="required-marker" aria-hidden="true">*</span></label>
-              <input id="lessons" v-model.number="lessonsPerWeek" type="number" min="1" max="7" class="form-control" :class="{ 'is-invalid': fieldErrors.lessonsPerWeek }" :aria-invalid="!!fieldErrors.lessonsPerWeek" :aria-describedby="fieldErrors.lessonsPerWeek ? 'lessons-error' : undefined" required @input="handleFieldChange('lessonsPerWeek')" @blur="handleFieldChange('lessonsPerWeek')" />
-              <div v-if="fieldErrors.lessonsPerWeek" id="lessons-error" class="invalid-feedback d-block">{{ fieldErrors.lessonsPerWeek }}</div>
-            </div>
-            <div class="col-12 col-sm-4">
               <label class="form-label" for="session-duration">Session duration (minutes) <span class="required-marker" aria-hidden="true">*</span></label>
               <input
                 id="session-duration"
@@ -685,6 +653,10 @@ async function remove() {
           <p class="text-muted small">
             Add at least 1 stage. A course can have up to {{ MAX_STAGES }} stages.
           </p>
+          <p class="stage-note small">
+            <strong>Note:</strong> 1 stage is 1 session. Your student books a session time for each stage,
+            so a course with 4 stages has 4 sessions.
+          </p>
 
           <div v-for="(s, i) in stages" :key="s.key" class="card card-body mb-3">
             <div class="d-flex justify-content-between align-items-center mb-2">
@@ -778,5 +750,14 @@ async function remove() {
 .slot-input {
   flex: 1 1 9rem;
   min-width: 0;
+}
+
+/* "1 stage is 1 session" tip above the stage list */
+.stage-note {
+  background: #fdf6e3;
+  border-left: 4px solid #c9a227;
+  border-radius: 0.5rem;
+  padding: 0.6rem 0.8rem;
+  color: #4a3b1f;
 }
 </style>

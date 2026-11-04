@@ -13,14 +13,27 @@ export function reflectionsWaiting(b) {
   return (b.stageProgress || []).filter((stage) => stage.reflection && !stage.approved).length
 }
 
-// A class I attend, as the student: unread messages from the teacher, and the stages the teacher
-// approved since I last opened the class's Details
-export function learnerActionCount(b) {
-  return unreadOf(b) + (b.newApprovals || 0)
+// 1 if the other person suggested a lesson time and it is my turn to answer,
+// and 1 more if they accepted a time I suggested (until I open the class)
+// and 1 more if they cancelled a session (until I open the class)
+export function scheduleNews(b) {
+  return (b.proposalForMe ? 1 : 0) + (b.timeAgreed ? 1 : 0) + (b.sessionCancelled ? 1 : 0)
 }
 
-// One of my students, as their teacher: reflections to approve, messages to read, and 1 more if
-// they joined since I last opened the course's Students list
+// A class I attend, as the student: unread messages from the teacher, the stages the teacher
+// approved since I last opened the class's Details, and news about its lesson times
+export function learnerActionCount(b) {
+  return unreadOf(b) + (b.newApprovals || 0) + scheduleNews(b)
+}
+
+// What the Details button of a class I attend shows: everything except the chat messages,
+// which have their own number on the Chat button
+export function detailsCount(b) {
+  return (b.newApprovals || 0) + scheduleNews(b)
+}
+
+// One of my students, as their teacher: reflections to approve, messages to read, 1 more if
+// they joined since I last opened the course's Students list, and news about lesson times
 export function studentActionCount(b) {
-  return reflectionsWaiting(b) + unreadOf(b) + (b.newStudent ? 1 : 0)
+  return reflectionsWaiting(b) + unreadOf(b) + (b.newStudent ? 1 : 0) + scheduleNews(b)
 }

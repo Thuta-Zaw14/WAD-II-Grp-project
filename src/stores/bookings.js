@@ -2,7 +2,7 @@ import { ref, computed } from 'vue'
 import { defineStore } from 'pinia'
 import {
   getMyBookings, bookSlot, cancelBooking, confirmBooking, reportBooking, removeStudent, markSeenByTeacher,
-  markSeenByLearner, submitStageReflection, approveBookingStage, errorText,
+  markSeenByLearner, submitStageReflection, approveBookingStage, proposeSessionTime, answerSessionTime, cancelSessionTime, errorText,
 } from '../services/api'
 import { learnerActionCount, studentActionCount } from '../services/attention'
 import { useOffersStore } from './offers'
@@ -35,9 +35,15 @@ export const useBookingsStore = defineStore('bookings', () => {
   // The red numbers (see services/attention.js). Classes I attend: unread messages and newly
   // approved stages. Classes I host: reflections to approve, unread messages, new students and
   // cancellations. Together they are the number on "My Classes" in the nav bar.
-  const learningAlertCount = computed(() => learning.value.reduce((total, b) => total + learnerActionCount(b), 0))
+  // (a dropped or removed booking no longer counts: it is not listed on the page any more;
+  // the teacher's notice about a drop is counted separately, until they press "Got it")
+  const learningAlertCount = computed(() =>
+    learning.value.filter((b) => b.status !== 'cancelled').reduce((total, b) => total + learnerActionCount(b), 0)
+  )
   const teachingAlertCount = computed(
-    () => teaching.value.reduce((total, b) => total + studentActionCount(b), 0) + cancelNotices.value.length
+    () =>
+      teaching.value.filter((b) => b.status !== 'cancelled').reduce((total, b) => total + studentActionCount(b), 0) +
+      cancelNotices.value.length
   )
   const attentionCount = computed(() => learningAlertCount.value + teachingAlertCount.value)
 
@@ -248,6 +254,17 @@ export const useBookingsStore = defineStore('bookings', () => {
     }
   }
 
+  // The teacher opened one student's popup: "they accepted your time" is no longer new.
+  // Quiet if it fails (the number simply stays until next time).
+  async function markStudentSeen(id) {
+    try {
+      const data = await markSeenByTeacher(id)
+      replaceBooking(data.booking)
+    } catch (err) {
+      console.log('Could not mark the booking as seen:', errorText(err))
+    }
+  }
+
   // The student opened a class's Details: its newly approved stages are no longer new.
   // Quiet if it fails (the number simply stays until next time).
   async function markApprovalsSeen(id) {
@@ -259,11 +276,65 @@ export const useBookingsStore = defineStore('bookings', () => {
     }
   }
 
+  // Suggest a lesson time for the current stage (startsAt: ISO date-time). Returns true / false.
+  async function proposeTime(id, startsAt, note) {
+    busyId.value = id
+    actionError.value = ''
+    try {
+      const data = await proposeSessionTime(id, startsAt, note)
+      replaceBooking(data.booking)
+      useToastStore().show('Time suggested. The other person can accept it or suggest another.')
+      busyId.value = ''
+      return true
+    } catch (err) {
+      actionError.value = errorText(err)
+      busyId.value = ''
+      return false
+    }
+  }
+
+  // Cancel the current stage's session (not the course). Returns true / false.
+  async function cancelSession(id) {
+    busyId.value = id
+    actionError.value = ''
+    try {
+      const data = await cancelSessionTime(id)
+      replaceBooking(data.booking)
+      if (data.penalty) await useProfileStore().fetchProfile() // the credit left my balance
+      useToastStore().show(
+        data.penalty
+          ? 'Session cancelled. 1 credit went to the other person. Book a new time when you can.'
+          : 'Session cancelled. Book a new time when you can.'
+      )
+      busyId.value = ''
+      return true
+    } catch (err) {
+      actionError.value = errorText(err)
+      busyId.value = ''
+      return false
+    }
+  }
+
+  // accept (true) or decline (false) the other person's suggested time
+  async function answerTime(id, accept) {
+    busyId.value = id
+    actionError.value = ''
+    try {
+      const data = await answerSessionTime(id, accept)
+      replaceBooking(data.booking)
+      useToastStore().show(accept ? 'New session time agreed.' : 'Suggestion declined. The agreed time stays.')
+    } catch (err) {
+      actionError.value = errorText(err)
+    }
+    busyId.value = ''
+  }
+
   return {
     bookings, loading, error, actionError, busyId, booking,
     learning, teaching, heldCredits, cancelNotices,
     learningAlertCount, teachingAlertCount, attentionCount,
     fetchBookings, refreshBookings, book, cancel, confirm, report, remove, reset,
-    submitReflection, approveStage, dismissNotice, markStudentsSeen, markApprovalsSeen,
+    submitReflection, approveStage, dismissNotice, markStudentsSeen, markStudentSeen, markApprovalsSeen,
+    proposeTime, answerTime, cancelSession,
   }
 })

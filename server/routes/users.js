@@ -253,8 +253,6 @@ router.get('/:uid/public', verifyToken, async (req, res) => {
         issuer: card.issuer || '',
         dateAttained: card.dateAttained || '',
         sessionDurationMinutes: card.sessionDurationMinutes || 60,
-        durationWeeks: card.durationWeeks || 1,
-        lessonsPerWeek: card.lessonsPerWeek || 1,
         completedStageCount: card.completedStageCount || (Array.isArray(card.subskills) ? card.subskills.length : 0),
       }))
       .sort((a, b) => b.dateAttained.localeCompare(a.dateAttained))

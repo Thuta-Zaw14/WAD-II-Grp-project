@@ -13,6 +13,65 @@ export function slotMoment(date, time) {
   return new Date(date + 'T' + time + ':00+08:00')
 }
 
+// ---------- Session times (one lesson per stage) ----------
+// A session's time can be changed until this long before it, and a new time must be at least
+// this far ahead. The same 24 hours as cancelling, so there is one number to remember.
+export const SCHEDULE_NOTICE_HOURS = 24
+
+// A session can be cancelled until this long before it (cancelSession in bookings.js)
+export const CANCEL_SESSION_HOURS = 2
+
+// When a stage's lesson is ('' = not booked yet). A booking made before lesson times were stored
+// only has its start time, which is the first stage's lesson. A cancelled session (noSession)
+// has no time until a new one is agreed, even for the first stage.
+export function sessionAtOf(booking, savedStage, index) {
+  if (savedStage && savedStage.noSession === true) return ''
+  if (savedStage && typeof savedStage.sessionAt === 'string' && savedStage.sessionAt !== '') {
+    return savedStage.sessionAt
+  }
+  return index === 0 ? booking.startsAt || '' : ''
+}
+
+// Can the current stage's session be cancelled now? It has to be booked and more than
+// CANCEL_SESSION_HOURS away. -> { stage } or null
+export function cancellableSession(booking, progress, now) {
+  if (booking.status !== 'booked') return null
+  const stage = currentStageIndexOf(progress)
+  if (stage === -1 || !progress[stage].sessionAt) return null
+  const hoursLeft = (new Date(progress[stage].sessionAt).getTime() - now.getTime()) / HOUR
+  return hoursLeft > CANCEL_SESSION_HOURS ? { stage: stage } : null
+}
+
+// Dropping a course: does the student get the credits back? Before it starts, yes if it is more
+// than CANCEL_HOURS_BEFORE ahead. After it has started, yes if fewer than half of its stages are
+// completed; from half onwards the credits go to the teacher.
+export function dropRefunds(booking, progress, now) {
+  const startsAt = new Date(booking.startsAt)
+  if (now < startsAt) return now < cancelDeadline(startsAt)
+  const approved = progress.filter((stage) => stage.approved).length
+  return approved < progress.length / 2
+}
+
+// the stage being worked on now: the first one not approved yet (-1 when every stage is done)
+export function currentStageIndexOf(progress) {
+  return progress.findIndex((stage) => !stage.approved)
+}
+
+// Which session can be set or changed right now, and how: { stage, kind } or null.
+//   kind 'book'       - the current stage has no lesson time yet ("Book Next Session")
+//   kind 'reschedule' - its lesson is more than SCHEDULE_NOTICE_HOURS away ("Reschedule")
+// Nothing can be changed once the lesson is less than that away, or after it has started.
+// progress is the full list of stages, each with sessionAt (see sessionAtOf).
+export function schedulableStage(booking, progress, now) {
+  if (booking.status !== 'booked') return null
+  const stage = currentStageIndexOf(progress)
+  if (stage === -1) return null
+  const sessionAt = progress[stage].sessionAt
+  if (!sessionAt) return { stage: stage, kind: 'book' }
+  const hoursLeft = (new Date(sessionAt).getTime() - now.getTime()) / HOUR
+  return hoursLeft > SCHEDULE_NOTICE_HOURS ? { stage: stage, kind: 'reschedule' } : null
+}
+
 // the last moment a student can still cancel
 export function cancelDeadline(startsAt) {
   return new Date(startsAt.getTime() - CANCEL_HOURS_BEFORE * HOUR)

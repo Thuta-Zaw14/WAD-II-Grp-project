@@ -30,7 +30,11 @@
 import { db } from '../config/firebaseAdmin.js'
 import { findDocsWhereEquals } from './dbQuery.js'
 import { MAX_REFERRAL_REWARDS, REFERRAL_REWARD_INVITER, REFERRAL_REWARD_FRIEND } from '../config/credits.js'
-import { slotMoment, cancelDeadline, finishTime, singaporeDate, describeMoment, roleOf, phaseOf } from './bookingRules.js'
+import {
+  slotMoment, cancelDeadline, finishTime, singaporeDate, describeMoment, roleOf, phaseOf,
+  SCHEDULE_NOTICE_HOURS, sessionAtOf, currentStageIndexOf, schedulableStage,
+  CANCEL_SESSION_HOURS, cancellableSession, dropRefunds,
+} from './bookingRules.js'
 
 const MAX_OPEN_REPORTS = 2 // reports one person can have waiting for an admin at the same time
 
@@ -96,12 +100,21 @@ export async function syncBookingsWithOffer(offerId, offer) {
   return count
 }
 
+// One line per stage: when its lesson is (sessionAt, see bookingRules.js), the student's
+// reflection, and whether and when the teacher approved it. Older bookings may have fewer
+// fields saved, so every one is filled in here.
 function stageProgressOf(booking) {
   const stageNames = Array.isArray(booking.stageNames) ? booking.stageNames : []
   const savedProgress = Array.isArray(booking.stageProgress) ? booking.stageProgress : []
   return stageNames.map((_, index) => {
     const saved = savedProgress[index] || {}
     return {
+      sessionAt: sessionAtOf(booking, saved, index),
+      noSession: saved.noSession === true, // its session was cancelled and no new one is agreed yet
+      rescheduleCount: Number.isInteger(saved.rescheduleCount) ? saved.rescheduleCount : 0,
+      // each person's one free cancellation of this stage's session (cancelSession)
+      cancelledByLearner: saved.cancelledByLearner === true,
+      cancelledByTeacher: saved.cancelledByTeacher === true,
       reflection: typeof saved.reflection === 'string' ? saved.reflection : '',
       submittedAt: saved.submittedAt || '',
       approved: saved.approved === true,
@@ -123,7 +136,6 @@ export async function submitStageReflection(uid, bookingId, stageIndex, reflecti
     const booking = snapshot.data()
     if (booking.learnerUid !== uid) return fail(403, 'Only the learner can update course progress.')
     if (booking.status !== 'booked') return fail(409, 'Progress can only be updated for an active course.')
-    if (phaseOf(booking, new Date()) === 'upcoming') return fail(409, 'Reflections open once the course has started.')
 
     const stageNames = Array.isArray(booking.stageNames) ? booking.stageNames : []
     if (!Number.isInteger(stageIndex) || stageIndex < 0 || stageIndex >= stageNames.length) {
@@ -135,8 +147,17 @@ export async function submitStageReflection(uid, bookingId, stageIndex, reflecti
       return fail(409, 'Complete the previous stage before submitting this reflection.')
     }
     if (progress[stageIndex].approved) return fail(409, 'This stage has already been approved.')
+
+    // a stage's reflection opens once its lesson has started
+    const sessionAt = progress[stageIndex].sessionAt
+    if (!sessionAt) return fail(409, 'Book a session for this stage first.')
+    if (new Date() < new Date(sessionAt)) {
+      return fail(409, "This stage's reflection opens when its session starts (" + describeMoment(new Date(sessionAt)) + ').')
+    }
+
     const now = new Date().toISOString()
     progress[stageIndex] = {
+      ...progress[stageIndex], // keeps the lesson time
       reflection: cleanReflection,
       submittedAt: now,
       approved: false,
@@ -177,7 +198,8 @@ export async function approveBookingStage(uid, bookingId, stageIndex) {
     if (!progress[stageIndex].reflection) return fail(409, 'The learner must submit a reflection first.')
     if (progress[stageIndex].approved) return fail(409, 'This stage has already been approved.')
 
-    const now = new Date().toISOString()
+    const nowDate = new Date()
+    const now = nowDate.toISOString()
     progress[stageIndex] = { ...progress[stageIndex], approved: true, approvedAt: now }
     const changes = {
       stageProgress: progress,
@@ -186,9 +208,221 @@ export async function approveBookingStage(uid, bookingId, stageIndex) {
       learnerUnseenApprovals: (booking.learnerUnseenApprovals || 0) + 1,
       updatedAt: now,
     }
+    // a suggested time for this stage's lesson is no longer needed
+    if (booking.proposal && booking.proposal.stage === stageIndex) changes.proposal = null
+
+    // The last stage: the course is complete. The teacher is paid and the student gets their
+    // skill card straight away, the same as when both people confirm (confirmBooking).
+    const courseComplete = currentStageIndexOf(progress) === -1
+    let accounts = null
+    if (courseComplete) {
+      accounts = await readFinishAccounts(t, booking)
+      if (accounts.error) return accounts
+    }
+
+    // --- writes ---
+    if (courseComplete) {
+      changes.learnerConfirmed = true
+      changes.teacherConfirmed = true
+      writeFinish(t, bookingId, booking, accounts, nowDate, changes)
+    }
     t.update(bookingRef, changes)
 
     return { booking: { id: bookingId, ...booking, ...changes } }
+  })
+}
+
+// ---------- Agreeing on a lesson time (either person suggests one, the other answers) ----------
+// A booking keeps at most one suggestion:
+//   proposal: { stage, startsAt, from: 'learner' | 'teacher', note, round, createdAt }
+// It is always for the stage being worked on now, and only while that stage's lesson can still be
+// set or moved (schedulableStage in bookingRules.js: not booked yet, or more than 24 hours away).
+// The other person accepts it, declines it, or suggests another time instead (round goes up each
+// time it changes hands). The agreed time only changes when someone accepts.
+const MAX_PROPOSAL_NOTE = 300
+const HOUR = 60 * 60 * 1000
+
+// '' if the time is far enough ahead, otherwise what is wrong with it
+function newTimeProblem(startsAt, now) {
+  if (Number.isNaN(startsAt.getTime())) return 'Pick a date and a time.'
+  const ahead = startsAt.getTime() - now.getTime()
+  if (ahead < SCHEDULE_NOTICE_HOURS * HOUR) return 'Pick a time at least ' + SCHEDULE_NOTICE_HOURS + ' hours from now.'
+  if (ahead > 366 * 24 * HOUR) return 'Pick a time within the next year.'
+  return ''
+}
+
+// why no lesson time can be suggested right now
+function nothingToSchedule(progress) {
+  if (currentStageIndexOf(progress) === -1) return 'Every stage of this course is done.'
+  return 'This session is less than ' + SCHEDULE_NOTICE_HOURS + ' hours away, so its time can no longer be changed.'
+}
+
+export async function proposeSessionTime(uid, bookingId, startsAtText, note) {
+  const cleanNote = typeof note === 'string' ? note.trim() : ''
+  if (cleanNote.length > MAX_PROPOSAL_NOTE) return fail(400, 'The note must be ' + MAX_PROPOSAL_NOTE + ' characters or fewer.')
+  const startsAt = new Date(typeof startsAtText === 'string' ? startsAtText : '')
+
+  const bookingRef = db.collection('bookings').doc(bookingId)
+  return db.runTransaction(async (t) => {
+    const snapshot = await t.get(bookingRef)
+    if (!snapshot.exists) return fail(404, 'Booking not found.')
+    const booking = snapshot.data()
+    const role = roleOf(booking, uid)
+    if (role === '') return fail(403, 'This is not your booking.')
+    if (booking.status !== 'booked') return fail(409, 'Lesson times can only be changed for an active course.')
+
+    const now = new Date()
+    const problem = newTimeProblem(startsAt, now)
+    if (problem) return fail(400, problem)
+
+    const progress = stageProgressOf(booking)
+    const target = schedulableStage(booking, progress, now)
+    if (!target) return fail(409, nothingToSchedule(progress))
+    const agreed = progress[target.stage].sessionAt
+    if (agreed && new Date(agreed).getTime() === startsAt.getTime()) return fail(400, 'That is already the agreed time.')
+
+    // answering the other person's suggestion with a different time is a counter-offer
+    const old = booking.proposal && booking.proposal.stage === target.stage ? booking.proposal : null
+    const round = old ? (old.from !== role ? (old.round || 1) + 1 : old.round || 1) : 1
+    const changes = {
+      proposal: { stage: target.stage, startsAt: startsAt.toISOString(), from: role, note: cleanNote, round: round, createdAt: now.toISOString() },
+      updatedAt: now.toISOString(),
+    }
+    t.update(bookingRef, changes)
+    return { booking: { id: bookingId, ...booking, ...changes } }
+  })
+}
+
+// accept true: the suggested time becomes the agreed one. false: it is dropped, nothing else changes.
+export async function answerSessionTime(uid, bookingId, accept) {
+  const bookingRef = db.collection('bookings').doc(bookingId)
+  return db.runTransaction(async (t) => {
+    const snapshot = await t.get(bookingRef)
+    if (!snapshot.exists) return fail(404, 'Booking not found.')
+    const booking = snapshot.data()
+    const role = roleOf(booking, uid)
+    if (role === '') return fail(403, 'This is not your booking.')
+    const proposal = booking.proposal
+    if (!proposal) return fail(404, 'There is no suggested time to answer.')
+    if (proposal.from === role) return fail(409, 'Wait for the other person to answer your suggestion.')
+
+    const now = new Date()
+    const progress = stageProgressOf(booking)
+    const target = schedulableStage(booking, progress, now)
+    if (!target || target.stage !== proposal.stage) {
+      return fail(409, 'This suggestion has expired: the session is now less than ' + SCHEDULE_NOTICE_HOURS + ' hours away.')
+    }
+
+    const changes = { proposal: null, updatedAt: now.toISOString() }
+    if (!accept) {
+      t.update(bookingRef, changes)
+      return { booking: { id: bookingId, ...booking, ...changes } }
+    }
+
+    const startsAt = new Date(proposal.startsAt)
+    if (newTimeProblem(startsAt, now)) return fail(409, 'This suggested time is now too soon. Please suggest another time.')
+
+    // The first stage's lesson is when the course starts, so moving it moves the booking: its
+    // start and finish times, and the student leaves the group start time (their seat is freed).
+    const stage = proposal.stage
+    const movesStart = stage === 0
+    const offerRef = db.collection('offers').doc(booking.offerId)
+    const offerSnap = movesStart && booking.slotId ? await t.get(offerRef) : null
+
+    // --- writes ---
+    progress[stage] = {
+      ...progress[stage],
+      sessionAt: startsAt.toISOString(),
+      noSession: false,
+      rescheduleCount: progress[stage].rescheduleCount + (progress[stage].sessionAt ? 1 : 0),
+    }
+    changes.stageProgress = progress
+    // tell the person who suggested the time that it was accepted (a red number for them, until
+    // they open the class: markSeenByLearner / markSeenByTeacher)
+    changes.agreedNotice = { role: proposal.from, stage: stage, startsAt: startsAt.toISOString(), at: now.toISOString() }
+    if (movesStart) {
+      const weeks = Number.isInteger(booking.durationWeeks) && booking.durationWeeks >= 1 ? booking.durationWeeks : 1
+      changes.startsAt = startsAt.toISOString()
+      changes.finishAfter = finishTime(startsAt, weeks).toISOString()
+      changes.slotDate = singaporeDate(startsAt)
+      changes.slotTime = new Date(startsAt.getTime() + 8 * HOUR).toISOString().slice(11, 16) // Singapore time
+      changes.slotId = '' // their own time now, not one of the course's start times
+      if (offerSnap && offerSnap.exists) {
+        const slots = (offerSnap.data().slots || []).map((slot) =>
+          slot.id === booking.slotId ? { ...slot, bookedBy: bookedByOf(slot).filter((other) => other !== booking.learnerUid) } : slot
+        )
+        t.update(offerRef, { slots: slots })
+      }
+    }
+    t.update(bookingRef, changes)
+    return { booking: { id: bookingId, ...booking, ...changes } }
+  })
+}
+
+// ---------- Cancelling one session (not the course) ----------
+// Either person can cancel the current stage's session until CANCEL_SESSION_HOURS before it.
+// The stage then needs a new time (Book Next Session) and the other person is told.
+// Each person's FIRST cancellation of a stage is free. Each one after that costs them
+// SESSION_CANCEL_PENALTY credit, which goes to the other person (they kept the time free).
+export const SESSION_CANCEL_PENALTY = 1
+
+export async function cancelSession(uid, bookingId) {
+  const bookingRef = db.collection('bookings').doc(bookingId)
+  return db.runTransaction(async (t) => {
+    const snapshot = await t.get(bookingRef)
+    if (!snapshot.exists) return fail(404, 'Booking not found.')
+    const booking = snapshot.data()
+    const role = roleOf(booking, uid)
+    if (role === '') return fail(403, 'This is not your booking.')
+    if (booking.status !== 'booked') return fail(409, 'Sessions can only be cancelled for an active course.')
+
+    const now = new Date()
+    const progress = stageProgressOf(booking)
+    const target = cancellableSession(booking, progress, now)
+    if (!target) {
+      return fail(409, 'This session can no longer be cancelled: it is less than ' + CANCEL_SESSION_HOURS + ' hours away, or not booked.')
+    }
+    const stage = target.stage
+    const myFlag = role === 'learner' ? 'cancelledByLearner' : 'cancelledByTeacher'
+    const penalty = progress[stage][myFlag] === true
+
+    // a second cancellation by the same person costs them a credit, paid to the other person
+    const meRef = db.collection('users').doc(uid)
+    const otherRef = db.collection('users').doc(role === 'learner' ? booking.teacherUid : booking.learnerUid)
+    let meSnap = null
+    let otherSnap = null
+    if (penalty) {
+      meSnap = await t.get(meRef)
+      otherSnap = await t.get(otherRef)
+      const credits = meSnap.exists ? meSnap.data().credits || 0 : 0
+      if (credits < SESSION_CANCEL_PENALTY) {
+        return fail(409, 'You already cancelled this stage once, so cancelling again costs ' + creditsText(SESSION_CANCEL_PENALTY) + ', and you have ' + credits + '.')
+      }
+      if (!otherSnap.exists) return fail(409, "The other person's account could not be found.")
+    }
+
+    // --- writes ---
+    const cancelledAt = progress[stage].sessionAt
+    progress[stage] = { ...progress[stage], sessionAt: '', noSession: true, [myFlag]: true }
+    const changes = {
+      stageProgress: progress,
+      // the other person gets a red number and a note until they open the class
+      sessionCancelNotice: {
+        role: role === 'learner' ? 'teacher' : 'learner',
+        stage: stage,
+        sessionAt: cancelledAt,
+        penalty: penalty,
+        at: now.toISOString(),
+      },
+      updatedAt: now.toISOString(),
+    }
+    if (booking.proposal && booking.proposal.stage === stage) changes.proposal = null // a suggestion for it is void
+    t.update(bookingRef, changes)
+    if (penalty) {
+      t.update(meRef, { credits: (meSnap.data().credits || 0) - SESSION_CANCEL_PENALTY })
+      t.update(otherRef, { credits: (otherSnap.data().credits || 0) + SESSION_CANCEL_PENALTY })
+    }
+    return { booking: { id: bookingId, ...booking, ...changes }, penalty: penalty }
   })
 }
 
@@ -266,12 +500,16 @@ export async function bookSlot(uid, offerId, slotId) {
       teacherUid: offer.teacherUid,
       teacherName: offer.teacherName || teacherSnap.data().name || '',
       ...details,
-      stageProgress: details.stageNames.map(() => ({
+      // the first stage's lesson is the start time just booked; the others are agreed later
+      stageProgress: details.stageNames.map((_, index) => ({
+        sessionAt: index === 0 ? startsAt.toISOString() : '',
+        rescheduleCount: 0,
         reflection: '',
         submittedAt: '',
         approved: false,
         approvedAt: '',
       })),
+      proposal: null, // a suggested lesson time waiting for the other person (proposeSessionTime)
       slotDate: slot.date,
       slotTime: slot.time,
       startsAt: startsAt.toISOString(),
@@ -293,7 +531,12 @@ export async function bookSlot(uid, offerId, slotId) {
   })
 }
 
-// ---------- Cancel (the student only, until 24 hours before the start) ----------
+// ---------- Drop the course (the student only, any time while it is active) ----------
+// Where the held credits go (dropRefunds in bookingRules.js):
+//   before the start   - back to the student if more than 24 hours ahead, otherwise the teacher
+//   after the start    - back to the student if fewer than half of the stages are completed,
+//                        otherwise the teacher (who has taught most of it)
+// Either way the seat is freed, and the teacher is told (teacherNoticeSeen, CancelNotices.vue).
 export async function cancelBooking(uid, bookingId) {
   const bookingRef = db.collection('bookings').doc(bookingId)
 
@@ -309,13 +552,10 @@ export async function cancelBooking(uid, bookingId) {
 
     const now = new Date()
     const startsAt = new Date(booking.startsAt)
-    if (now >= startsAt) {
-      return fail(409, 'This class has already started, so it can no longer be cancelled. Use "Report a problem" if something went wrong.')
-    }
-    // More than 24 hours before the start: the held credits go back to the student. Later than
-    // that (until the start) the student can still give up the seat, but the credits go to the
-    // teacher, who kept the time free for them.
-    const refunded = now < cancelDeadline(startsAt)
+    const progress = stageProgressOf(booking)
+    const midCourse = now >= startsAt // dropping a course that has already started
+    const refunded = dropRefunds(booking, progress, now)
+    const approvedStages = progress.filter((stage) => stage.approved).length
 
     const offerRef = db.collection('offers').doc(booking.offerId)
     const learnerRef = db.collection('users').doc(uid)
@@ -332,6 +572,10 @@ export async function cancelBooking(uid, bookingId) {
       status: 'cancelled',
       cancelledAt: now.toISOString(),
       refunded: refunded,
+      // after the start: how far the student got, for the messages on both sides
+      droppedMidCourse: midCourse,
+      stagesCompletedWhenDropped: approvedStages,
+      proposal: null,
       teacherNoticeSeen: false, // the teacher is told on Home and My Classes until they dismiss it
       updatedAt: now.toISOString(),
     }
@@ -377,6 +621,8 @@ export async function markSeenByTeacher(uid, bookingId) {
 
   const nowText = new Date().toISOString()
   const changes = { teacherSeenJoin: true }
+  if (booking.agreedNotice && booking.agreedNotice.role === 'teacher') changes.agreedNotice = null // "they accepted your time"
+  if (booking.sessionCancelNotice && booking.sessionCancelNotice.role === 'teacher') changes.sessionCancelNotice = null // "they cancelled a session"
   if (booking.status === 'cancelled') {
     changes.teacherNoticeSeen = true
     changes.teacherNoticeSeenAt = nowText
@@ -396,6 +642,8 @@ export async function markSeenByLearner(uid, bookingId) {
   if (booking.learnerUid !== uid) return fail(403, 'Only the student can do this.')
 
   const changes = { learnerUnseenApprovals: 0 }
+  if (booking.agreedNotice && booking.agreedNotice.role === 'learner') changes.agreedNotice = null // "they accepted your time"
+  if (booking.sessionCancelNotice && booking.sessionCancelNotice.role === 'learner') changes.sessionCancelNotice = null // "they cancelled a session"
   await bookingRef.update(changes)
   return { booking: { id: bookingId, ...booking, ...changes } }
 }
@@ -485,84 +733,96 @@ export async function confirmBooking(uid, bookingId) {
     changes[myFlag] = true
     const bothConfirmed = booking[otherFlag] === true
 
-    // The other accounts are only needed when this confirmation completes the pair:
-    // the teacher (gets paid), the student, and the person who invited the student (if any).
-    const teacherRef = db.collection('users').doc(booking.teacherUid)
-    const learnerRef = db.collection('users').doc(booking.learnerUid)
-    let teacherSnap = null
-    let learnerSnap = null
-    let inviterRef = null
-    let inviterSnap = null
+    // the other accounts are only needed when this confirmation completes the pair
+    let accounts = null
     if (bothConfirmed) {
-      teacherSnap = await t.get(teacherRef)
-      if (!teacherSnap.exists) return fail(409, "The teacher's account could not be found.")
-
-      learnerSnap = await t.get(learnerRef)
-      const learner = learnerSnap.exists ? learnerSnap.data() : {}
-      // a student who was invited, and has not finished a course before, is on their first one now
-      // (a teacher who invited their own student is not paid for it: that would let one person
-      // farm rewards by inviting extra accounts into their own courses)
-      if (learner.referredBy && learner.referralRewarded !== true && learner.referredBy !== booking.teacherUid) {
-        inviterRef = db.collection('users').doc(learner.referredBy)
-        inviterSnap = await t.get(inviterRef)
-      }
+      accounts = await readFinishAccounts(t, booking)
+      if (accounts.error) return accounts
     }
 
     // --- writes ---
-    if (bothConfirmed) {
-      changes.status = 'finished'
-      changes.finishedAt = now.toISOString()
-
-      // Credits to add to each person. Everybody is updated ONCE (a teacher can also be the
-      // person who invited the student), so the changes are collected here first.
-      const people = {}
-      function pay(uid, ref, snap, credits, extraFields) {
-        if (!people[uid]) people[uid] = { ref: ref, credits: snap.data().credits || 0, fields: {} }
-        people[uid].credits += credits
-        Object.assign(people[uid].fields, extraFields)
-      }
-
-      // the held credit goes to the teacher
-      pay(booking.teacherUid, teacherRef, teacherSnap, booking.creditCost, {})
-
-      // Invite a friend: the first finished course of an invited student rewards whoever invited
-      // them, up to MAX_REFERRAL_REWARDS friends. The student's first course counts as "used" either
-      // way, so a full inviter does not get paid later either.
-      if (inviterSnap !== null) {
-        const rewardsSoFar = inviterSnap.exists ? inviterSnap.data().referralsRewarded || 0 : 0
-        const inviterIsPaid = inviterSnap.exists && rewardsSoFar < MAX_REFERRAL_REWARDS
-
-        pay(booking.learnerUid, learnerRef, learnerSnap, inviterIsPaid ? REFERRAL_REWARD_FRIEND : 0, { referralRewarded: true })
-        if (inviterIsPaid) {
-          pay(inviterRef.id, inviterRef, inviterSnap, REFERRAL_REWARD_INVITER, { referralsRewarded: rewardsSoFar + 1 })
-        }
-      }
-
-      for (const uid of Object.keys(people)) {
-        t.update(people[uid].ref, { ...people[uid].fields, credits: people[uid].credits })
-      }
-
-      // the student's reward: a skill card (same id as the booking, so it can never be made twice)
-      t.set(db.collection('skillCards').doc(bookingId), {
-        learnerUid: booking.learnerUid,
-        bookingId: bookingId,
-        offerId: booking.offerId,
-        name: booking.skill,
-        courseTitle: booking.title,
-        category: booking.category,
-        subskills: booking.stageNames || [],
-        issuer: booking.teacherName,
-        dateAttained: singaporeDate(now),
-        sessionDurationMinutes: booking.sessionDurationMinutes || 60,
-        durationWeeks: booking.durationWeeks || 1,
-        lessonsPerWeek: booking.lessonsPerWeek || 1,
-        completedStageCount: (booking.stageNames || []).length,
-        createdAt: now.toISOString(),
-      })
-    }
+    if (bothConfirmed) writeFinish(t, bookingId, booking, accounts, now, changes)
     t.update(bookingRef, changes)
 
     return { booking: { id: bookingId, ...booking, ...changes } }
+  })
+}
+
+// ---------- Finishing a course: the teacher is paid and the student gets a skill card ----------
+// Used when both people confirm (confirmBooking) and when the teacher approves the last stage
+// (approveBookingStage). Inside a transaction, readFinishAccounts runs with the other reads
+// (before any write) and writeFinish with the writes.
+
+// the teacher (gets paid), the student, and the person who invited the student (if any)
+async function readFinishAccounts(t, booking) {
+  const teacherRef = db.collection('users').doc(booking.teacherUid)
+  const learnerRef = db.collection('users').doc(booking.learnerUid)
+  const teacherSnap = await t.get(teacherRef)
+  if (!teacherSnap.exists) return fail(409, "The teacher's account could not be found.")
+
+  const learnerSnap = await t.get(learnerRef)
+  const learner = learnerSnap.exists ? learnerSnap.data() : {}
+  // a student who was invited, and has not finished a course before, is on their first one now
+  // (a teacher who invited their own student is not paid for it: that would let one person
+  // farm rewards by inviting extra accounts into their own courses)
+  let inviterRef = null
+  let inviterSnap = null
+  if (learner.referredBy && learner.referralRewarded !== true && learner.referredBy !== booking.teacherUid) {
+    inviterRef = db.collection('users').doc(learner.referredBy)
+    inviterSnap = await t.get(inviterRef)
+  }
+  return { teacherRef, teacherSnap, learnerRef, learnerSnap, inviterRef, inviterSnap }
+}
+
+// adds the "finished" fields to changes, pays everyone and writes the skill card
+function writeFinish(t, bookingId, booking, accounts, now, changes) {
+  const { teacherRef, teacherSnap, learnerRef, learnerSnap, inviterRef, inviterSnap } = accounts
+  changes.status = 'finished'
+  changes.finishedAt = now.toISOString()
+
+  // Credits to add to each person. Everybody is updated ONCE (a teacher can also be the
+  // person who invited the student), so the changes are collected here first.
+  const people = {}
+  function pay(uid, ref, snap, credits, extraFields) {
+    if (!people[uid]) people[uid] = { ref: ref, credits: snap.data().credits || 0, fields: {} }
+    people[uid].credits += credits
+    Object.assign(people[uid].fields, extraFields)
+  }
+
+  // the held credit goes to the teacher
+  pay(booking.teacherUid, teacherRef, teacherSnap, booking.creditCost, {})
+
+  // Invite a friend: the first finished course of an invited student rewards whoever invited
+  // them, up to MAX_REFERRAL_REWARDS friends. The student's first course counts as "used" either
+  // way, so a full inviter does not get paid later either.
+  if (inviterSnap !== null) {
+    const rewardsSoFar = inviterSnap.exists ? inviterSnap.data().referralsRewarded || 0 : 0
+    const inviterIsPaid = inviterSnap.exists && rewardsSoFar < MAX_REFERRAL_REWARDS
+
+    pay(booking.learnerUid, learnerRef, learnerSnap, inviterIsPaid ? REFERRAL_REWARD_FRIEND : 0, { referralRewarded: true })
+    if (inviterIsPaid) {
+      pay(inviterRef.id, inviterRef, inviterSnap, REFERRAL_REWARD_INVITER, { referralsRewarded: rewardsSoFar + 1 })
+    }
+  }
+
+  for (const uid of Object.keys(people)) {
+    t.update(people[uid].ref, { ...people[uid].fields, credits: people[uid].credits })
+  }
+
+  // the student's reward: a skill card (same id as the booking, so it can never be made twice)
+  t.set(db.collection('skillCards').doc(bookingId), {
+    learnerUid: booking.learnerUid,
+    bookingId: bookingId,
+    offerId: booking.offerId,
+    name: booking.skill,
+    courseTitle: booking.title,
+    category: booking.category,
+    subskills: booking.stageNames || [],
+    issuer: booking.teacherName,
+    dateAttained: singaporeDate(now),
+    sessionDurationMinutes: booking.sessionDurationMinutes || 60,
+    completedStageCount: (booking.stageNames || []).length,
+    createdAt: now.toISOString(),
   })
 }
 

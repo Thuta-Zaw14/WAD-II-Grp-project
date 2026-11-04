@@ -207,6 +207,27 @@ export async function markSeenByLearner(id) {
   return response.data
 }
 
+// ---------- Lesson times (one per stage) ----------
+// suggest a time for the current stage's lesson (book it, move it, or counter-offer)
+// startsAt is an ISO date-time -> { booking }
+export async function proposeSessionTime(id, startsAt, note) {
+  const body = { startsAt: startsAt, note: note }
+  const response = await axios.post(API + '/bookings/' + encodeURIComponent(id) + '/schedule/propose', body, await authConfig())
+  return response.data
+}
+
+// cancel the current stage's session (not the course) -> { booking, penalty }
+export async function cancelSessionTime(id) {
+  const response = await axios.post(API + '/bookings/' + encodeURIComponent(id) + '/schedule/cancel', {}, await authConfig())
+  return response.data
+}
+
+// accept (true) or decline (false) the other person's suggested time -> { booking }
+export async function answerSessionTime(id, accept) {
+  const response = await axios.post(API + '/bookings/' + encodeURIComponent(id) + '/schedule/answer', { accept: accept }, await authConfig())
+  return response.data
+}
+
 // -> { booking }
 export async function confirmBooking(id) {
   const response = await axios.post(API + '/bookings/' + encodeURIComponent(id) + '/confirm', {}, await authConfig())

@@ -1,6 +1,6 @@
 <script setup>
 import { ref, reactive, computed, watch, onMounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRouter, useRoute } from 'vue-router'
 import { auth } from '../firebase'
 import { getMyReports, createReport, markReportSeen, searchReportTargets, errorText } from '../services/api'
 import { useToastStore } from '../stores/toast'
@@ -264,8 +264,28 @@ function clearForm() {
   summaryError.value = ''
 }
 
+// "Report a problem" on My Classes opens this form about one course:
+// /reports/new?courseId=...&courseName=... picks it already (the server checks it again)
+const route = useRoute()
+
+function prefillFromAddress() {
+  const id = typeof route.query.courseId === 'string' ? route.query.courseId : ''
+  const name = typeof route.query.courseName === 'string' ? route.query.courseName : ''
+  if (!props.creating || !id || !name) return
+  form.type = 'course'
+  form.target = { id: id, name: name }
+  search.text = name
+}
+
 // the same page is used for the list and the form, so start a clean form each time it opens
-watch(() => props.creating, clearForm)
+watch(
+  () => props.creating,
+  () => {
+    clearForm()
+    prefillFromAddress()
+  }
+)
+prefillFromAddress()
 
 async function submit() {
   if (!validateForm()) return // the server checks again too

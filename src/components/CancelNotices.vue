@@ -31,6 +31,12 @@ function formatTime(iso) {
           {{ b.learnerName }} cancelled {{ b.title }}
         </p>
         <p class="small mb-0">
+          <template v-if="b.droppedMidCourse">
+            They dropped the course after completing {{ b.stagesCompletedWhenDropped }} of {{ b.totalStageCount }} stages, so
+            <strong v-if="b.refunded">{{ b.learnerName }} was refunded the {{ creditsText(b.creditCost) }}</strong>
+            <strong v-else>you received the {{ creditsText(b.creditCost) }}</strong>.
+          </template>
+          <template v-else>
           It was starting {{ formatTime(b.startsAt) }}.
           <template v-if="b.refunded">
             They cancelled more than 24 hours before the start, so
@@ -39,6 +45,7 @@ function formatTime(iso) {
           <template v-else>
             They cancelled less than 24 hours before the start, so
             <strong>you received the {{ creditsText(b.creditCost) }}</strong>.
+          </template>
           </template>
           Their seat is free again.
         </p>

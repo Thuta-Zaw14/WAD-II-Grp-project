@@ -94,12 +94,6 @@ function findProblem(body, uid, user, existing) {
   if (!Number.isInteger(body.maxCapacity) || body.maxCapacity < 1 || body.maxCapacity > 50) {
     return 'Maximum students must be a whole number from 1 to 50.'
   }
-  if (!Number.isInteger(body.durationWeeks) || body.durationWeeks < 1 || body.durationWeeks > 52) {
-    return 'Course length must be a whole number of weeks (1-52).'
-  }
-  if (!Number.isInteger(body.lessonsPerWeek) || body.lessonsPerWeek < 1 || body.lessonsPerWeek > 7) {
-    return 'Lessons per week must be a whole number (1-7).'
-  }
   if (!Number.isInteger(body.sessionDurationMinutes) || body.sessionDurationMinutes < 1 || body.sessionDurationMinutes > 1440) {
     return 'Session duration must be a whole number from 1 to 1440 minutes.'
   }
@@ -258,8 +252,6 @@ function buildOffer(body, uid, user, existing, place) {
     equipmentProvided: equipmentOption === 'provided',
     difficulty: difficulty,
     maxCapacity: body.maxCapacity,
-    durationWeeks: body.durationWeeks,
-    lessonsPerWeek: body.lessonsPerWeek,
     sessionDurationMinutes: body.sessionDurationMinutes,
     stages: stages,
     slots: buildSlots(body.slots, body.maxCapacity, existing),

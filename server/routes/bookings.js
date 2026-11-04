@@ -3,6 +3,7 @@ import { verifyToken } from '../middleware/verifyToken.js'
 import { findDocsWhereEquals } from '../models/dbQuery.js'
 import {
   cancelBooking, confirmBooking, reportBooking, removeStudent, markSeenByTeacher, markSeenByLearner,
+  proposeSessionTime, answerSessionTime, cancelSession,
   submitStageReflection, approveBookingStage,
 } from '../models/bookings.js'
 import { publicBooking, publicOffer, publicMessage, publicChatInfo } from '../models/publicView.js'
@@ -127,6 +128,50 @@ router.post('/:id/learner-seen', verifyToken, async (req, res) => {
   } catch (err) {
     console.log('markSeenByLearner failed:', err.message)
     res.status(500).json({ error: 'Could not update the booking. Please try again.' })
+  }
+})
+
+// Suggest a lesson time for the current stage (book it, move it, or counter the other person's
+// suggestion). body: { startsAt, note }. The rules are in models/bookings.js.
+router.post('/:id/schedule/propose', verifyToken, async (req, res) => {
+  try {
+    const result = await proposeSessionTime(req.user.uid, req.params.id, req.body.startsAt, req.body.note)
+    if (result.error) {
+      return res.status(result.status).json({ error: result.error })
+    }
+    res.json({ booking: publicBooking(result.booking, req.user.uid) })
+  } catch (err) {
+    console.log('proposeSessionTime failed:', err.message)
+    res.status(500).json({ error: 'Could not send your suggestion. Please try again.' })
+  }
+})
+
+// Accept or decline the other person's suggested time. body: { accept: true | false }
+router.post('/:id/schedule/answer', verifyToken, async (req, res) => {
+  try {
+    const result = await answerSessionTime(req.user.uid, req.params.id, req.body.accept === true)
+    if (result.error) {
+      return res.status(result.status).json({ error: result.error })
+    }
+    res.json({ booking: publicBooking(result.booking, req.user.uid) })
+  } catch (err) {
+    console.log('answerSessionTime failed:', err.message)
+    res.status(500).json({ error: 'Could not answer the suggestion. Please try again.' })
+  }
+})
+
+// Cancel the current stage's session (not the course): free the first time per person per stage,
+// 1 credit to the other person after that. -> { booking, penalty }
+router.post('/:id/schedule/cancel', verifyToken, async (req, res) => {
+  try {
+    const result = await cancelSession(req.user.uid, req.params.id)
+    if (result.error) {
+      return res.status(result.status).json({ error: result.error })
+    }
+    res.json({ booking: publicBooking(result.booking, req.user.uid), penalty: result.penalty })
+  } catch (err) {
+    console.log('cancelSession failed:', err.message)
+    res.status(500).json({ error: 'Could not cancel the session. Please try again.' })
   }
 })
 

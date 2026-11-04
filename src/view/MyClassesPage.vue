@@ -8,7 +8,8 @@ import { useOffersStore } from '../stores/offers'
 import { useToastStore } from '../stores/toast'
 import NavBar from '../components/NavBar.vue'
 import CancelNotices from '../components/CancelNotices.vue'
-import { unreadOf, reflectionsWaiting, studentActionCount } from '../services/attention'
+import SessionSchedule from '../components/SessionSchedule.vue'
+import { unreadOf, reflectionsWaiting, studentActionCount, detailsCount } from '../services/attention'
 import LoadingText from '../components/LoadingText.vue'
 import EmptyState from '../components/EmptyState.vue'
 import ClassModal from '../components/ClassModal.vue'
@@ -120,6 +121,19 @@ function currentStageIndex(b) {
   return -1
 }
 
+// the current stage's reflection opens once its session has started (the server checks too)
+function canReflect(b) {
+  if (b.status !== 'booked') return false
+  const stage = (b.stageProgress || [])[currentStageIndex(b)]
+  return Boolean(stage && stage.sessionAt && new Date(stage.sessionAt) <= new Date())
+}
+
+// Classes I Am Attending: a finished course leaves this list. It is on the Profile page instead,
+// as a skill card (the server makes the card when the last stage is approved).
+// A course I dropped (or was removed from) leaves the list too: status 'cancelled'.
+const attendingList = computed(() => store.learning.filter((b) => b.status !== 'finished' && b.status !== 'cancelled'))
+const hasFinishedCourses = computed(() => store.learning.some((b) => b.status === 'finished'))
+
 function approvedCount(b) {
   return (b.stageProgress || []).filter((stage) => stage.approved).length
 }
@@ -139,6 +153,10 @@ function creditNote(b) {
   }
   if (b.role === 'learner') {
     if (b.status === 'finished') return cost + ' paid to ' + b.teacherName + '.'
+    if (b.status === 'cancelled' && b.droppedMidCourse) {
+      return 'You dropped the course after ' + b.stagesCompletedWhenDropped + ' of ' + b.totalStageCount + ' stages, so the ' +
+        cost + (b.refunded ? ' were refunded.' : ' went to ' + b.teacherName + '.')
+    }
     if (b.status === 'cancelled' && b.refunded === false) {
       return 'Cancelled less than 24 hours before the start, so the ' + cost + ' went to ' + b.teacherName + '.'
     }
@@ -146,6 +164,10 @@ function creditNote(b) {
     return cost + ' held until the course is finished.'
   }
   if (b.status === 'finished') return 'You earned ' + cost + '.'
+  if (b.status === 'cancelled' && b.droppedMidCourse) {
+    return 'The student dropped the course after ' + b.stagesCompletedWhenDropped + ' of ' + b.totalStageCount + ' stages, so ' +
+      (b.refunded ? 'they were refunded.' : 'you got the ' + cost + '.')
+  }
   if (b.status === 'cancelled' && b.refunded === false) {
     return 'The student cancelled less than 24 hours before the start, so you got the ' + cost + '.'
   }
@@ -160,8 +182,10 @@ function isActive(b) {
 }
 
 // My students in one course, people still taking it first
+// A student who dropped the course, or whom I removed, is no longer listed (status 'cancelled');
+// the teacher was told about a drop on Home and My Classes (CancelNotices.vue).
 function studentsOf(offerId) {
-  const list = store.teaching.filter((b) => b.offerId === offerId)
+  const list = store.teaching.filter((b) => b.offerId === offerId && b.status !== 'cancelled')
   return [...list.filter(isActive), ...list.filter((b) => !isActive(b))]
 }
 
@@ -176,7 +200,7 @@ function activeStudentCount(offerId) {
 function courseActionCount(offerId) {
   let total = 0
   for (const b of store.teaching) {
-    if (b.offerId === offerId) total += studentActionCount(b)
+    if (b.offerId === offerId && b.status !== 'cancelled') total += studentActionCount(b)
   }
   return total
 }
@@ -215,16 +239,41 @@ const stack = ref([])
 const top = computed(() => stack.value[stack.value.length - 1] || null)
 const formError = ref('') // a problem with what was typed in the open popup
 
+// which way the popups move: a new one slides in from the right, "‹" brings the one before
+// back from the left (ClassModal.vue)
+const slideDir = ref('forward')
+
 function open(card) {
   store.actionError = ''
   formError.value = ''
+  slideDir.value = 'forward'
   stack.value = [...stack.value, card]
 }
 
 function back() {
   store.actionError = ''
   formError.value = ''
+  slideDir.value = 'back'
   stack.value = stack.value.slice(0, -1)
+}
+
+// "Report a problem": the File New Report page, with this course already picked
+function reportProblem(b) {
+  closeAll()
+  router.push({ path: '/reports/new', query: { courseId: b.offerId, courseName: b.title } })
+}
+
+// the date and time picker, and "cancel this session?", each in their own popup
+function openScheduleCard(b) {
+  open({ type: 'schedule', bookingId: b.id })
+}
+
+function openCancelSessionCard(b) {
+  open({ type: 'cancelSession', bookingId: b.id })
+}
+
+async function doCancelSession(b) {
+  if (await store.cancelSession(b.id)) back()
 }
 
 function closeAll() {
@@ -256,7 +305,8 @@ async function openDetails(b) {
   extraStep.value = ''
   newlyApprovedCount.value = b.newApprovals || 0
   open({ type: 'details', bookingId: b.id })
-  if (newlyApprovedCount.value > 0) store.markApprovalsSeen(b.id)
+  // newly approved stages, and "the teacher accepted your time", are seen once Details is open
+  if (newlyApprovedCount.value > 0 || b.timeAgreed || b.sessionCancelled) store.markApprovalsSeen(b.id)
   // the description lives on the course, so load the courses once if they are not here yet
   if (offersStore.offers.length === 0 && !offersStore.loading) {
     await offersStore.fetchOffers()
@@ -353,6 +403,7 @@ const openReflections = ref([]) // the stage numbers whose reflection is shown
 function openStudent(b) {
   openReflections.value = []
   open({ type: 'student', bookingId: b.id })
+  if (b.timeAgreed || b.sessionCancelled) store.markStudentSeen(b.id) // "accepted your time" / "cancelled a session" are seen now
 }
 
 function toggleReflection(index) {
@@ -431,7 +482,7 @@ async function addSlot() {
     <div class="p-4 mb-4 banner d-flex justify-content-between align-items-center flex-wrap gap-2">
       <div>
         <h1 class="h4 mb-1">My Classes</h1>
-        <p class="mb-0">The classes you attend and the classes you host. A class is finished when both of you confirm it.</p>
+        <p class="mb-0">The classes you attend and the classes you host. A class is finished when its last stage is approved.</p>
       </div>
       <div class="text-center">
         <div class="fs-2 fw-bold font-heading">{{ credits }}</div>
@@ -476,7 +527,7 @@ async function addSlot() {
             </template>
           </h2>
 
-          <div v-for="b in store.learning" :key="b.id" class="class-row">
+          <div v-for="b in attendingList" :key="b.id" class="class-row">
             <div class="d-flex justify-content-between align-items-start gap-2">
               <div class="min-w-0">
                 <h3 class="h6 mb-1" :class="{ 'cancelled-title': b.status === 'cancelled' }">{{ b.title }}</h3>
@@ -506,12 +557,12 @@ async function addSlot() {
             <div class="d-flex flex-wrap gap-2">
               <button type="button" class="btn btn-sm btn-outline-secondary position-relative" @click="openDetails(b)">
                 Details
-                <span v-if="b.newApprovals > 0" class="count-alert count-corner">
-                  {{ b.newApprovals }}<span class="visually-hidden"> stages newly approved</span>
+                <span v-if="detailsCount(b) > 0" class="count-alert count-corner">
+                  {{ detailsCount(b) }}<span class="visually-hidden"> updates: approved stages or session times</span>
                 </span>
               </button>
               <button
-                v-if="b.status === 'booked' && currentStageIndex(b) >= 0"
+                v-if="canReflect(b)"
                 type="button"
                 class="btn btn-sm btn-brand"
                 @click="openReflection(b)"
@@ -534,10 +585,13 @@ async function addSlot() {
           </div>
 
           <EmptyState
-            v-if="store.learning.length === 0 && !store.loading && !store.error"
+            v-if="attendingList.length === 0 && !store.loading && !store.error"
             icon="📚"
-            title="You have not booked a class yet."
+            :title="hasFinishedCourses ? 'No classes in progress.' : 'You have not booked a class yet.'"
           >
+            <p v-if="hasFinishedCourses" class="small text-muted">
+              Courses you finished are on your Profile as skill cards.
+            </p>
             <button class="btn btn-sm btn-brand" @click="router.push('/courses')">Find a course</button>
           </EmptyState>
         </div>
@@ -616,6 +670,7 @@ async function addSlot() {
     :title="topBooking.title"
     :subtitle="'Instructor: ' + topBooking.teacherName"
     :can-go-back="stack.length > 1"
+    :slide="slideDir"
     @back="back"
     @close="closeAll"
   >
@@ -628,12 +683,17 @@ async function addSlot() {
     <template v-if="topBooking.totalStageCount > 0">
       <h3 class="h6">Stages</h3>
       <ol class="stage-list">
-        <li v-for="(stage, index) in topBooking.stageProgress" :key="index" class="stage-item">
-          <span>
-            {{ stage.stageName }}
-            <span v-if="isNewlyApproved(topBooking, index)" class="new-tag">New</span>
-          </span>
-          <span class="stage-pill" :class="'stage-' + stageState(stage)">{{ stageLabels[stageState(stage)] }}</span>
+        <li v-for="(stage, index) in topBooking.stageProgress" :key="index" class="stage-item stage-item-times">
+          <div class="d-flex justify-content-between align-items-center gap-2 w-100">
+            <span>
+              {{ stage.stageName }}
+              <span v-if="isNewlyApproved(topBooking, index)" class="new-tag">New</span>
+            </span>
+            <span class="stage-pill" :class="'stage-' + stageState(stage)">{{ stageLabels[stageState(stage)] }}</span>
+          </div>
+          <!-- when this stage's lesson is, and when it was completed -->
+          <div class="small text-muted">Session: {{ stage.sessionAt ? formatTime(stage.sessionAt) : 'not booked yet' }}</div>
+          <div v-if="stage.approved && stage.approvedAt" class="small text-muted">Completed: {{ formatTime(stage.approvedAt) }}</div>
         </li>
         <li v-for="n in lockedStageCount(topBooking)" :key="'locked-' + n" class="stage-item stage-locked">
           <span>Stage {{ topBooking.stageNames.length + n }}</span>
@@ -642,6 +702,15 @@ async function addSlot() {
       </ol>
     </template>
 
+    <!-- booking or moving the current stage's session (suggest a time, the teacher answers) -->
+    <SessionSchedule
+      :booking="topBooking"
+      :show-stages="false"
+      @chat="openChat(topBooking)"
+      @propose="openScheduleCard(topBooking)"
+      @cancel-session="openCancelSessionCard(topBooking)"
+    />
+
     <!-- what happens next -->
     <p v-if="topBooking.phase === 'upcoming' && topBooking.canCancel && topBooking.cancelRefunds" class="small text-muted mb-2">
       Free cancellation until {{ formatTime(topBooking.cancelBefore) }}. After that you can still cancel, but your credits go to {{ topBooking.teacherName }}.
@@ -649,8 +718,9 @@ async function addSlot() {
     <p v-else-if="topBooking.phase === 'upcoming' && topBooking.canCancel" class="small text-muted mb-2">
       It starts in less than 24 hours: you can still cancel, but your credits go to {{ topBooking.teacherName }}.
     </p>
-    <p v-else-if="topBooking.phase === 'inProgress'" class="small text-muted mb-2">
-      You can mark it finished from {{ formatTime(topBooking.finishAfter) }}.
+    <p v-else-if="topBooking.status === 'booked' && currentStageIndex(topBooking) !== -1" class="small text-muted mb-2">
+      The course is finished when {{ topBooking.teacherName }} approves the last stage. It then moves to your
+      Profile as a skill card.
     </p>
     <p v-else-if="topBooking.phase === 'readyToFinish' && topBooking.myConfirmed" class="small text-muted mb-2">
       You confirmed. Waiting for {{ topBooking.teacherName }}.
@@ -671,9 +741,8 @@ async function addSlot() {
     <div v-if="store.actionError" class="alert alert-danger small mt-2 mb-0" role="alert">{{ store.actionError }}</div>
 
     <template v-if="topBooking.canCancel || topBooking.canReport || topBooking.canConfirm" #footer>
-      <button v-if="topBooking.canCancel" type="button" class="btn btn-sm btn-outline-secondary" @click="comingSoon('Rescheduling')">Reschedule</button>
-      <button v-if="topBooking.canCancel" type="button" class="btn btn-sm btn-outline-danger" @click="openCancel(topBooking)">Cancel booking</button>
-      <button v-if="topBooking.canReport" type="button" class="btn btn-sm btn-outline-secondary" @click="showExtraStep('report')">Report a problem</button>
+      <button v-if="topBooking.canCancel" type="button" class="btn btn-sm btn-outline-danger" @click="openCancel(topBooking)">Drop course</button>
+      <button v-if="topBooking.canReport" type="button" class="btn btn-sm btn-outline-secondary" @click="reportProblem(topBooking)">Report a problem</button>
       <button v-if="topBooking.canConfirm" type="button" class="btn btn-sm btn-brand" :disabled="store.busyId === topBooking.id" @click="doConfirm(topBooking)">
         Mark as finished
       </button>
@@ -683,31 +752,97 @@ async function addSlot() {
   <!-- Cancel a class I attend: are you sure? -->
   <ClassModal
     v-else-if="top && top.type === 'cancel' && topBooking"
-    title="Cancel this class?"
-    :subtitle="topBooking.title + ' · starts ' + formatTime(topBooking.startsAt)"
+    title="Drop this course?"
+    :subtitle="topBooking.title"
     :can-go-back="stack.length > 1"
+    :slide="slideDir"
     @back="back"
     @close="closeAll"
   >
-    <template v-if="topBooking.cancelRefunds">
-      <p class="mb-2">
+    <p class="mb-2">You leave the whole course, not just one session. This can't be undone.</p>
+    <!-- before the start: the 24-hour rule; after it: half of the stages (bookingRules.js) -->
+    <template v-if="!topBooking.dropMidCourse">
+      <p v-if="topBooking.cancelRefunds" class="mb-2">
         You'll get your <strong>{{ creditsText(topBooking.creditCost) }}</strong> back, and your seat goes to someone else.
       </p>
-      <p class="small text-muted mb-0">Free cancellation is open until {{ formatTime(topBooking.cancelBefore) }}.</p>
+      <p v-else class="mb-2">
+        It starts in less than 24 hours, so you <strong>won't get your {{ creditsText(topBooking.creditCost) }} back</strong>:
+        they go to {{ topBooking.teacherName }}, who kept this time for you.
+      </p>
     </template>
     <template v-else>
-      <p class="mb-2">
-        This class starts in less than 24 hours. If you cancel now, you <strong>won't get your
-        {{ creditsText(topBooking.creditCost) }} back</strong>: they go to {{ topBooking.teacherName }}, who kept this time for you.
+      <p v-if="topBooking.cancelRefunds" class="mb-2">
+        You've completed {{ approvedCount(topBooking) }} of {{ topBooking.totalStageCount }} stages (less than half), so
+        you'll get your <strong>{{ creditsText(topBooking.creditCost) }}</strong> back.
       </p>
-      <p class="small text-muted mb-0">Your seat will be freed for someone else.</p>
+      <p v-else class="mb-2">
+        You've completed {{ approvedCount(topBooking) }} of {{ topBooking.totalStageCount }} stages (half or more), so the
+        <strong>{{ creditsText(topBooking.creditCost) }}</strong> go to {{ topBooking.teacherName }}.
+      </p>
+      <p class="small text-muted mb-0">If you only need to miss one lesson, cancel that session instead: no credits change.</p>
     </template>
     <div v-if="store.actionError" class="alert alert-danger small mt-2 mb-0" role="alert">{{ store.actionError }}</div>
 
     <template #footer>
-      <button type="button" class="btn btn-sm btn-outline-secondary" @click="stack.length > 1 ? back() : closeAll()">Keep my booking</button>
+      <button type="button" class="btn btn-sm btn-outline-secondary" @click="stack.length > 1 ? back() : closeAll()">Keep the course</button>
       <button type="button" class="btn btn-sm btn-danger" :disabled="store.busyId === topBooking.id" @click="doCancel(topBooking)">
-        {{ store.busyId === topBooking.id ? 'Cancelling...' : 'Yes, cancel' }}
+        {{ store.busyId === topBooking.id ? 'Dropping...' : 'Yes, drop course' }}
+      </button>
+    </template>
+  </ClassModal>
+
+  <!-- Suggest a session time (book the next one, move it, or counter-offer): its own popup -->
+  <ClassModal
+    v-else-if="top && top.type === 'schedule' && topBooking"
+    :title="topBooking.schedule && topBooking.schedule.kind === 'book' ? 'Book next session' : 'Suggest a new time'"
+    :subtitle="topBooking.title"
+    :can-go-back="stack.length > 1"
+    :slide="slideDir"
+    @back="back"
+    @close="closeAll"
+  >
+    <SessionSchedule :booking="topBooking" :show-stages="false" mode="form" @chat="openChat(topBooking)" @done="back" />
+    <div v-if="store.actionError" class="alert alert-danger small mt-2 mb-0" role="alert">{{ store.actionError }}</div>
+  </ClassModal>
+
+  <!-- Cancel one session (not the course) -->
+  <ClassModal
+    v-else-if="top && top.type === 'cancelSession' && topBooking"
+    title="Cancel this session?"
+    :subtitle="topBooking.title"
+    :can-go-back="stack.length > 1"
+    :slide="slideDir"
+    @back="back"
+    @close="closeAll"
+  >
+    <template v-if="topBooking.cancelSession">
+      <p class="mb-2">
+        The session for <strong>Stage {{ topBooking.cancelSession.stage + 1 }}</strong>
+        ({{ formatTime(topBooking.stageProgress[topBooking.cancelSession.stage].sessionAt) }}) will be cancelled.
+        {{ topBooking.role === 'learner' ? topBooking.teacherName : topBooking.learnerName }} will be told, and you can
+        book a new time together.
+      </p>
+      <p v-if="!topBooking.cancelSession.penalty" class="small mb-0">
+        This is your one free cancellation for this stage. <strong>No credits change.</strong>
+      </p>
+      <p v-else class="small text-danger mb-0">
+        You already cancelled this stage once, so this costs you <strong>1 credit</strong>, which goes to
+        {{ topBooking.role === 'learner' ? topBooking.teacherName : topBooking.learnerName }}.
+      </p>
+    </template>
+    <p v-else class="mb-0">This session can no longer be cancelled: it is less than 2 hours away.</p>
+    <div v-if="store.actionError" class="alert alert-danger small mt-2 mb-0" role="alert">{{ store.actionError }}</div>
+
+    <template #footer>
+      <button type="button" class="btn btn-sm btn-outline-secondary" @click="back">Keep the session</button>
+      <button
+        v-if="topBooking.cancelSession"
+        type="button"
+        class="btn btn-sm btn-danger"
+        :disabled="store.busyId === topBooking.id"
+        @click="doCancelSession(topBooking)"
+      >
+        {{ store.busyId === topBooking.id ? 'Cancelling...' : 'Yes, cancel session' }}
       </button>
     </template>
   </ClassModal>
@@ -718,6 +853,7 @@ async function addSlot() {
     :title="reflectionStage ? reflectionStage.stageName : topBooking.title"
     :subtitle="reflectionStage ? 'Stage ' + (reflectionStage.index + 1) + ' of ' + topBooking.totalStageCount + ' · ' + topBooking.title : topBooking.title"
     :can-go-back="stack.length > 1"
+    :slide="slideDir"
     @back="back"
     @close="closeAll"
   >
@@ -754,6 +890,7 @@ async function addSlot() {
     title="Students enrolled"
     :subtitle="topOffer.title"
     :can-go-back="stack.length > 1"
+    :slide="slideDir"
     @back="back"
     @close="closeAll"
   >
@@ -782,6 +919,7 @@ async function addSlot() {
     :title="topBooking.learnerName"
     :subtitle="topBooking.title + ' · ' + phaseLabels[topBooking.phase]"
     :can-go-back="stack.length > 1"
+    :slide="slideDir"
     @back="back"
     @close="closeAll"
   >
@@ -796,15 +934,20 @@ async function addSlot() {
           <button
             v-if="stage.reflection"
             type="button"
-            class="btn btn-sm btn-link p-0 flex-shrink-0"
+            class="reflection-button flex-shrink-0"
+            :class="{ waiting: !stage.approved, open: openReflections.includes(index) }"
             :aria-expanded="openReflections.includes(index) ? 'true' : 'false'"
             @click="toggleReflection(index)"
           >
+            <span aria-hidden="true">📝</span>
             {{ openReflections.includes(index) ? 'Hide reflection' : 'View reflection' }}
-            <span v-if="!stage.approved" class="review-badge ms-1">!</span>
+            <span v-if="!stage.approved" class="review-badge">!<span class="visually-hidden"> waiting for your approval</span></span>
           </button>
           <span v-else class="stage-pill stage-todo flex-shrink-0">Ongoing</span>
         </div>
+        <!-- when this stage's lesson is, and when it was completed -->
+        <div class="small text-muted mt-1">Session: {{ stage.sessionAt ? formatTime(stage.sessionAt) : 'not booked yet' }}</div>
+        <div v-if="stage.approved && stage.approvedAt" class="small text-muted">Completed: {{ formatTime(stage.approvedAt) }}</div>
         <div v-if="openReflections.includes(index)" class="reflection-box mt-2">
           <p class="mb-2">{{ stage.reflection }}</p>
           <span v-if="stage.approved" class="stage-pill stage-approved">Approved</span>
@@ -823,6 +966,17 @@ async function addSlot() {
         The next stage opens after you approve this one.
       </p>
     </template>
+
+    <!-- booking or moving this student's current session (suggest a time, the student answers) -->
+    <div class="mt-3">
+      <SessionSchedule
+      :booking="topBooking"
+      :show-stages="false"
+      @chat="openChat(topBooking)"
+      @propose="openScheduleCard(topBooking)"
+      @cancel-session="openCancelSessionCard(topBooking)"
+    />
+    </div>
     <div v-if="store.actionError" class="alert alert-danger small mt-2 mb-0" role="alert">{{ store.actionError }}</div>
 
     <template v-if="topBooking.chatOpen || topBooking.messageCount > 0 || topBooking.canConfirm || topBooking.status === 'booked'" #footer>
@@ -835,7 +989,6 @@ async function addSlot() {
       <button v-if="topBooking.canConfirm" type="button" class="btn btn-sm btn-outline-secondary" :disabled="store.busyId === topBooking.id" @click="doConfirm(topBooking)">
         Mark as finished
       </button>
-      <button v-if="topBooking.status === 'booked'" type="button" class="btn btn-sm btn-outline-secondary" @click="comingSoon('Rescheduling')">Reschedule</button>
       <button v-if="topBooking.status === 'booked'" type="button" class="btn btn-sm btn-outline-danger" @click="comingSoon('Cancelling a session')">Cancel Session</button>
       <button v-if="topBooking.status === 'booked'" type="button" class="btn btn-sm btn-danger" @click="openKick(topBooking)">Kick</button>
     </template>
@@ -847,6 +1000,7 @@ async function addSlot() {
     :title="topBooking.learnerName"
     subtitle="Remove from this class"
     :can-go-back="stack.length > 1"
+    :slide="slideDir"
     @back="back"
     @close="closeAll"
   >
@@ -866,6 +1020,7 @@ async function addSlot() {
     v-else-if="top && top.type === 'confirmKick' && topBooking"
     title="Are you sure?"
     :can-go-back="stack.length > 1"
+    :slide="slideDir"
     @back="back"
     @close="closeAll"
   >
@@ -886,6 +1041,7 @@ async function addSlot() {
     title="New time slot"
     :subtitle="topOffer.title"
     :can-go-back="stack.length > 1"
+    :slide="slideDir"
     @back="back"
     @close="closeAll"
   >
@@ -1029,6 +1185,49 @@ async function addSlot() {
   margin-bottom: 6px;
   border: 1px solid var(--k-border);
   border-radius: 10px;
+}
+
+/* "View reflection" in a student's progress: a pill button. Tan while a reflection is waiting
+   for approval, dark brown while it is open. */
+.reflection-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  border: 1px solid var(--k-border);
+  border-radius: 999px;
+  background: var(--k-surface);
+  color: var(--k-accent);
+  font-size: 13px;
+  font-weight: 600;
+  transition: background-color 0.2s ease, color 0.2s ease, border-color 0.2s ease;
+}
+
+.reflection-button:hover {
+  border-color: var(--k-brand);
+}
+
+.reflection-button.waiting {
+  background: var(--k-brand-soft);
+  border-color: var(--k-brand);
+}
+
+.reflection-button.open {
+  background: var(--k-accent);
+  border-color: var(--k-accent);
+  color: var(--k-on-accent);
+}
+
+.reflection-button:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--k-brand-soft);
+}
+
+/* a stage with its session and completion times underneath */
+.stage-item-times {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 2px;
 }
 
 /* stages still hidden: striped, like the sketch */

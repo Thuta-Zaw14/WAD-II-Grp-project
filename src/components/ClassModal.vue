@@ -7,6 +7,9 @@ defineProps({
   title: { type: String, required: true },
   subtitle: { type: String, default: '' },
   canGoBack: { type: Boolean, default: false },
+  // how this popup arrives: 'forward' slides in from the right (opened from the one before),
+  // 'back' from the left (its next popup was closed with "‹")
+  slide: { type: String, default: '' },
 })
 const emit = defineEmits(['back', 'close'])
 
@@ -27,7 +30,13 @@ onUnmounted(() => {
 
 <template>
   <div class="modal-overlay" @click.self="emit('close')">
-    <section class="k-card class-modal" role="dialog" aria-modal="true" aria-labelledby="class-modal-title">
+    <section
+      class="k-card class-modal"
+      :class="slide ? 'slide-' + slide : ''"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="class-modal-title"
+    >
       <header class="modal-top d-flex align-items-start gap-2 px-3 py-3">
         <button
           v-if="canGoBack"
@@ -58,6 +67,37 @@ onUnmounted(() => {
 
 <style scoped>
 /* The colours, and the class k-card, come from src/assets/theme.css */
+
+/* moving between popups: the new one slides in from the side it came from */
+.slide-forward {
+  animation: slide-from-right 0.25s ease-out;
+}
+
+.slide-back {
+  animation: slide-from-left 0.25s ease-out;
+}
+
+@keyframes slide-from-right {
+  from { transform: translateX(48px); opacity: 0; }
+  to { transform: none; opacity: 1; }
+}
+
+@keyframes slide-from-left {
+  from { transform: translateX(-48px); opacity: 0; }
+  to { transform: none; opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .slide-forward,
+  .slide-back {
+    animation: fade-in 0.15s linear;
+  }
+
+  @keyframes fade-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+}
 .modal-overlay {
   position: fixed;
   inset: 0;

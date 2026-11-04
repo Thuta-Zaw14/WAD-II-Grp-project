@@ -1,7 +1,9 @@
 // What the browser is allowed to see.
 // The documents in Firestore hold things other people should not get (for example
 // the uids of everyone who booked a slot), so every route sends these cut-down copies.
-import { slotMoment, cancelDeadline, phaseOf, roleOf } from './bookingRules.js'
+import {
+  slotMoment, cancelDeadline, phaseOf, roleOf, sessionAtOf, schedulableStage, cancellableSession, dropRefunds,
+} from './bookingRules.js'
 
 // A slot in Firestore holds the uids of the students who booked it (bookedBy).
 // The browser only gets counts, plus 'mine' = did the person asking book this slot.
@@ -58,6 +60,9 @@ export function publicBooking(booking, uid, now = new Date()) {
     const saved = savedProgress[index] || {}
     return {
       stageName: stageName,
+      sessionAt: sessionAtOf(booking, saved, index), // when this stage's lesson is ('' = not booked yet)
+      // has the person asking used their one free cancellation of this stage's session?
+      myCancelUsed: (learnerSide ? saved.cancelledByLearner : saved.cancelledByTeacher) === true,
       reflection: typeof saved.reflection === 'string' ? saved.reflection : '',
       submittedAt: saved.submittedAt || '',
       approved: saved.approved === true,
@@ -68,6 +73,27 @@ export function publicBooking(booking, uid, now = new Date()) {
   const visibleStageCount = firstIncomplete === -1 ? allStageNames.length : firstIncomplete + 1
   const stageNames = allStageNames.slice(0, visibleStageCount)
   const stageProgress = allStageProgress.slice(0, visibleStageCount)
+
+  // Lesson times: which session can be set or moved now ({ stage, kind: 'book' | 'reschedule' }
+  // or null, see bookingRules.js), and the suggested time waiting for an answer, if any.
+  // A suggestion for a session that can no longer be changed has expired.
+  const schedule = role !== '' ? schedulableStage(booking, allStageProgress, now) : null
+  // can the current session be cancelled (more than 2 hours away), and would it cost me a credit?
+  const cancellable = role !== '' ? cancellableSession(booking, allStageProgress, now) : null
+  const cancelSession = cancellable
+    ? { stage: cancellable.stage, penalty: allStageProgress[cancellable.stage].myCancelUsed }
+    : null
+  const saved = role !== '' ? booking.proposal : null
+  const proposal = saved
+    ? {
+        stage: saved.stage,
+        startsAt: saved.startsAt,
+        note: saved.note || '',
+        round: saved.round || 1,
+        fromMe: saved.from === role,
+        expired: !schedule || schedule.stage !== saved.stage,
+      }
+    : null
 
   return {
     id: booking.id,
@@ -100,10 +126,14 @@ export function publicBooking(booking, uid, now = new Date()) {
     phase: phase,
     myConfirmed: myConfirmed === true,
     otherConfirmed: otherConfirmed === true,
-    // the student can cancel until the class starts; more than 24 hours before it is refunded,
-    // later than that the credits go to the teacher
-    canCancel: learnerSide && booking.status === 'booked' && now < startsAt,
-    cancelRefunds: now < cancelDeadline(startsAt),
+    // "Drop course": the student can leave any time while the course is active. Before the start,
+    // more than 24 hours ahead is refunded; after the start, fewer than half the stages completed
+    // is refunded; otherwise the credits go to the teacher (dropRefunds in bookingRules.js).
+    canCancel: learnerSide && booking.status === 'booked',
+    cancelRefunds: dropRefunds(booking, allStageProgress, now),
+    dropMidCourse: now >= startsAt,
+    droppedMidCourse: booking.droppedMidCourse === true,
+    stagesCompletedWhenDropped: booking.stagesCompletedWhenDropped || 0,
     refunded: booking.refunded !== false, // false only for a late cancellation, paid to the teacher (older ones were all refunded)
     cancelledAt: booking.cancelledAt || '',
     // the teacher has not yet seen that the student cancelled (only set by cancellations from now on)
@@ -112,7 +142,31 @@ export function publicBooking(booking, uid, now = new Date()) {
     newStudent: role === 'teacher' && booking.status === 'booked' && booking.teacherSeenJoin === false,
     // stages the teacher approved since the student last opened the class's Details
     newApprovals: learnerSide ? booking.learnerUnseenApprovals || 0 : 0,
-    canConfirm: booking.status === 'booked' && phase === 'readyToFinish' && myConfirmed !== true,
+    schedule: schedule,
+    proposal: proposal,
+    // the other person suggested a time and it is my turn to answer (a red number)
+    proposalForMe: proposal !== null && !proposal.fromMe && !proposal.expired,
+    // cancelling the current session: null, or { stage, penalty } (penalty: it would cost me a credit)
+    cancelSession: cancelSession,
+    // the other person cancelled a session, and I have not opened the class since (a red number)
+    sessionCancelled:
+      role !== '' && booking.sessionCancelNotice && booking.sessionCancelNotice.role === role
+        ? {
+            stage: booking.sessionCancelNotice.stage,
+            sessionAt: booking.sessionCancelNotice.sessionAt,
+            penalty: booking.sessionCancelNotice.penalty === true,
+          }
+        : null,
+    // the other person accepted the time I suggested, and I have not opened the class since (a red number)
+    timeAgreed:
+      role !== '' && booking.agreedNotice && booking.agreedNotice.role === role
+        ? { stage: booking.agreedNotice.stage, startsAt: booking.agreedNotice.startsAt }
+        : null,
+    // A course with stages finishes by itself when the last one is approved. "Mark as finished" is
+    // only for an older booking that reached the end with every stage approved but not confirmed.
+    canConfirm:
+      booking.status === 'booked' && phase === 'readyToFinish' && myConfirmed !== true &&
+      allStageProgress.every((stage) => stage.approved),
     canReport: booking.status === 'booked' && now >= startsAt,
     reportedByMe: reportedByMe,
     reportReason: reportedByMe ? booking.reportReason || '' : '', // only the person who reported sees it
