@@ -38,12 +38,13 @@ function byLastUpdated(a, b) {
 // ---------- Who or what a report is about ----------
 
 // A course is "ongoing" while at least one of its start times has not finished yet
-// (the start plus the course length is still ahead). Courses that have not started count too.
+// (the start plus the lesson's length is still ahead). Courses that have not started count too.
 function isOngoing(offer, now) {
+  const lessonMinutes = Number.isInteger(offer.sessionDurationMinutes) ? offer.sessionDurationMinutes : 60
   for (const slot of offer.slots || []) {
     const startsAt = slotMoment(slot.date, slot.time)
     if (Number.isNaN(startsAt.getTime())) continue
-    if (finishTime(startsAt, offer.durationWeeks || 1) > now) return true
+    if (finishTime(startsAt, lessonMinutes) > now) return true
   }
   return false
 }

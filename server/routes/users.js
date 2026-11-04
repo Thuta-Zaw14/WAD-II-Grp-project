@@ -252,9 +252,7 @@ router.get('/:uid/public', verifyToken, async (req, res) => {
         subskills: Array.isArray(card.subskills) ? card.subskills : [],
         issuer: card.issuer || '',
         dateAttained: card.dateAttained || '',
-        sessionDurationMinutes: card.sessionDurationMinutes || 60,
-        durationWeeks: card.durationWeeks || 1,
-        lessonsPerWeek: card.lessonsPerWeek || 1,
+        sessionDurationMinutes: card.sessionDurationMinutes || 60, // the length of the one lesson
         completedStageCount: card.completedStageCount || (Array.isArray(card.subskills) ? card.subskills.length : 0),
       }))
       .sort((a, b) => b.dateAttained.localeCompare(a.dateAttained))

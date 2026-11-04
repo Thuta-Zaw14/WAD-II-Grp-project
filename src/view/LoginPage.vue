@@ -1,5 +1,5 @@
 <script setup>
-import { ref, reactive, computed } from 'vue'
+import { ref, computed } from 'vue'
 import { auth } from '../firebase'
 import {
   signInWithEmailAndPassword,
@@ -10,7 +10,7 @@ import {
   browserLocalPersistence,
 } from 'firebase/auth'
 import { useRouter, useRoute } from 'vue-router'
-import { checkAdmin, verifyResetCode, resetPassword, errorText } from '../services/api'
+import { checkAdmin, errorText } from '../services/api'
 import { markActive } from '../services/idleLogout'
 import { IDLE_LOGOUT_MINUTES } from '../config'
 import LogoMark from '../components/LogoMark.vue'
@@ -31,10 +31,7 @@ if (inviteCode !== '') {
   localStorage.removeItem('inviteRef')
 }
 
-// Which card is showing:
-//   'login', 'signup'
-//   'forgot'      - "Forget Password": the email and the verification code
-//   'newPassword' - the code was right: enter the new password twice
+// Which card is showing: 'login' or 'signup'.
 // Someone who followed an invite link (or pressed "Sign up" on the landing page) most likely
 // needs to sign up.
 const mode = ref(inviteCode !== '' || route.query.mode === 'signup' ? 'signup' : 'login')
@@ -55,82 +52,13 @@ function switchMode() {
   message.value = ''
 }
 
-// The flip swaps in a new card, so the button that was pressed is gone. Put keyboard focus
-// somewhere sensible in the new card (the first box of the reset cards, otherwise the
-// Log in / Sign up switch), so a keyboard user is not sent back to the top of the page.
-// (after-enter only runs after a switch, never on the first load.)
+// The flip swaps in a new card, so the button that was pressed is gone. Put keyboard focus on
+// the Log in / Sign up switch of the new card, so a keyboard user is not sent back to the top
+// of the page. (after-enter only runs after a switch, never on the first load.)
 const switchButton = ref(null)
-const firstResetField = ref(null)
 
 function focusNewCard() {
-  if (firstResetField.value) firstResetField.value.focus()
-  else if (switchButton.value) switchButton.value.focus()
-}
-
-// ---------- Forget Password ----------
-// The code is checked by the server (routes/passwordResets.js), and checked again when the new
-// password is saved, so skipping the code card does not help anyone.
-const reset = reactive({ email: '', code: '', password: '', repeat: '', busy: false, error: '' })
-const resetErrors = reactive({ email: '', code: '', password: '', repeat: '' })
-
-function clearResetErrors() {
-  reset.error = ''
-  for (const field in resetErrors) resetErrors[field] = ''
-}
-
-function startReset() {
-  reset.email = email.value.trim() // whatever was already typed on the login card
-  reset.code = ''
-  reset.password = ''
-  reset.repeat = ''
-  clearResetErrors()
-  message.value = ''
-  mode.value = 'forgot'
-}
-
-function backToLogin() {
-  clearResetErrors()
-  mode.value = 'login'
-}
-
-async function checkCode() {
-  clearResetErrors()
-  if (reset.email.trim() === '') resetErrors.email = 'Please enter the email you signed up with.'
-  if (!/^[0-9]{6}$/.test(reset.code.trim())) resetErrors.code = 'Enter the 6-digit code.'
-  if (resetErrors.email || resetErrors.code) return
-
-  reset.busy = true
-  try {
-    await verifyResetCode(reset.email.trim(), reset.code.trim())
-    mode.value = 'newPassword'
-  } catch (err) {
-    reset.error = errorText(err)
-  }
-  reset.busy = false
-}
-
-async function saveNewPassword() {
-  clearResetErrors()
-  if (reset.password.length < 6) resetErrors.password = 'Your password must be at least 6 characters long.'
-  if (reset.repeat === '') resetErrors.repeat = 'Please enter the password again.'
-  else if (reset.repeat !== reset.password) resetErrors.repeat = 'The two passwords do not match.'
-  if (resetErrors.password || resetErrors.repeat) return
-
-  reset.busy = true
-  try {
-    await resetPassword(reset.email.trim(), reset.code.trim(), reset.password)
-    // back to the login card, ready to log in with the new password
-    email.value = reset.email.trim()
-    password.value = ''
-    reset.password = ''
-    reset.repeat = ''
-    isError.value = false
-    message.value = 'Your password has been changed. Log in with your new password.'
-    mode.value = 'login'
-  } catch (err) {
-    reset.error = errorText(err)
-  }
-  reset.busy = false
+  if (switchButton.value) switchButton.value.focus()
 }
 
 // What Firebase's error codes mean, in plain words. A wrong password and an unknown email give
@@ -225,116 +153,8 @@ async function goToStartPage() {
 
       <div class="col-12 col-md-6 form-side d-flex align-items-center justify-content-center p-3 p-md-4">
         <Transition name="flip" mode="out-in" @after-enter="focusNewCard">
-          <!-- Forget Password, step 1: the verification code -->
-          <form
-            v-if="mode === 'forgot'"
-            key="forgot"
-            class="card border-0 shadow w-100 p-4 p-md-5"
-            novalidate
-            @submit.prevent="checkCode"
-          >
-            <h2 class="h4 mb-2">Forget Password</h2>
-            <p class="text-muted mb-4">A verification code will be sent to your email.</p>
-
-            <div class="mb-3">
-              <label for="reset-email" class="form-label fw-semibold">Email</label>
-              <input
-                id="reset-email"
-                ref="firstResetField"
-                v-model="reset.email"
-                type="email"
-                class="form-control"
-                :class="{ 'is-invalid': resetErrors.email }"
-                :aria-invalid="!!resetErrors.email"
-                :aria-describedby="resetErrors.email ? 'reset-email-error' : undefined"
-                autocomplete="email"
-              />
-              <div v-if="resetErrors.email" id="reset-email-error" class="invalid-feedback d-block">{{ resetErrors.email }}</div>
-            </div>
-
-            <div class="mb-3">
-              <label for="reset-code" class="form-label fw-semibold">Verification code</label>
-              <input
-                id="reset-code"
-                v-model="reset.code"
-                type="text"
-                inputmode="numeric"
-                maxlength="6"
-                class="form-control code-input"
-                :class="{ 'is-invalid': resetErrors.code }"
-                :aria-invalid="!!resetErrors.code"
-                :aria-describedby="resetErrors.code ? 'reset-code-error' : undefined"
-                autocomplete="one-time-code"
-                placeholder="6-digit code"
-              />
-              <div v-if="resetErrors.code" id="reset-code-error" class="invalid-feedback d-block">{{ resetErrors.code }}</div>
-            </div>
-
-            <p v-if="reset.error" class="small text-danger" role="alert">{{ reset.error }}</p>
-
-            <button type="submit" class="btn btn-brand w-100 mt-2" :disabled="reset.busy">
-              {{ reset.busy ? 'Checking...' : 'Verify' }}
-            </button>
-            <p class="text-center small mt-3 mb-0">
-              <button type="button" class="btn btn-link btn-sm p-0 link-brand" @click="backToLogin">Back to login</button>
-            </p>
-          </form>
-
-          <!-- Forget Password, step 2: the new password -->
-          <form
-            v-else-if="mode === 'newPassword'"
-            key="newPassword"
-            class="card border-0 shadow w-100 p-4 p-md-5"
-            novalidate
-            @submit.prevent="saveNewPassword"
-          >
-            <h2 class="h4 mb-2">Set a new password</h2>
-            <p class="text-muted mb-4">For {{ reset.email.trim() }}</p>
-
-            <div class="mb-3">
-              <label for="reset-password" class="form-label fw-semibold">Enter Password</label>
-              <input
-                id="reset-password"
-                ref="firstResetField"
-                v-model="reset.password"
-                type="password"
-                class="form-control"
-                :class="{ 'is-invalid': resetErrors.password }"
-                :aria-invalid="!!resetErrors.password"
-                :aria-describedby="resetErrors.password ? 'reset-password-error' : 'reset-password-help'"
-                autocomplete="new-password"
-              />
-              <div v-if="resetErrors.password" id="reset-password-error" class="invalid-feedback d-block">{{ resetErrors.password }}</div>
-              <small v-else id="reset-password-help" class="text-muted">At least 6 characters.</small>
-            </div>
-
-            <div class="mb-3">
-              <label for="reset-repeat" class="form-label fw-semibold">Re-enter Password</label>
-              <input
-                id="reset-repeat"
-                v-model="reset.repeat"
-                type="password"
-                class="form-control"
-                :class="{ 'is-invalid': resetErrors.repeat }"
-                :aria-invalid="!!resetErrors.repeat"
-                :aria-describedby="resetErrors.repeat ? 'reset-repeat-error' : undefined"
-                autocomplete="new-password"
-              />
-              <div v-if="resetErrors.repeat" id="reset-repeat-error" class="invalid-feedback d-block">{{ resetErrors.repeat }}</div>
-            </div>
-
-            <p v-if="reset.error" class="small text-danger" role="alert">{{ reset.error }}</p>
-
-            <button type="submit" class="btn btn-brand w-100 mt-2" :disabled="reset.busy">
-              {{ reset.busy ? 'Saving...' : 'Change password' }}
-            </button>
-            <p class="text-center small mt-3 mb-0">
-              <button type="button" class="btn btn-link btn-sm p-0 link-brand" @click="backToLogin">Back to login</button>
-            </p>
-          </form>
-
           <!-- Login and Sign up -->
-          <form v-else :key="mode" class="card border-0 shadow w-100 p-4 p-md-5" @submit.prevent="submit">
+          <form :key="mode" class="card border-0 shadow w-100 p-4 p-md-5" @submit.prevent="submit">
             <h2 class="h4 mb-4">{{ isSignup ? 'Sign up' : 'Login' }}</h2>
 
             <p v-if="!isSignup && idleNotice" class="idle-notice small mb-3" role="status">{{ idleNotice }}</p>
@@ -358,9 +178,6 @@ async function goToStartPage() {
                 :autocomplete="isSignup ? 'new-password' : 'current-password'"
                 required
               />
-              <div v-if="!isSignup" class="text-end mt-1">
-                <button type="button" class="btn btn-link btn-sm p-0 link-brand" @click="startReset">Forget Password</button>
-              </div>
             </div>
 
             <button type="submit" class="btn btn-brand w-100 mt-2">
@@ -500,11 +317,5 @@ async function goToStartPage() {
   font-weight: 600;
   text-decoration: none;
   vertical-align: baseline;
-}
-
-/* the 6-digit code, spaced out so it is easy to check */
-.code-input {
-  letter-spacing: 0.3em;
-  font-variant-numeric: tabular-nums;
 }
 </style>

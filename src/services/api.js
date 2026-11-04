@@ -45,18 +45,6 @@ export async function createProfile() {
   return response.data
 }
 
-// ---------- Forget Password (the login page) ----------
-// The person is logged out, so these two send no token: the email and the code are the check.
-export async function verifyResetCode(email, code) {
-  const response = await axios.post(API + '/password-resets/verify', { email: email, code: code })
-  return response.data
-}
-
-export async function resetPassword(email, code, password) {
-  const response = await axios.post(API + '/password-resets', { email: email, code: code, password: password })
-  return response.data
-}
-
 export async function getMe() {
   const response = await axios.get(API + '/users/me', await authConfig())
   return response.data

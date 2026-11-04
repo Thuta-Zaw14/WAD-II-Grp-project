@@ -129,10 +129,9 @@ function formatDate(value) {
               <p v-if="course.courseTitle" class="small mb-1"><strong>Course:</strong> {{ course.courseTitle }}</p>
               <p v-if="course.issuer" class="small text-muted mb-2">Completed with {{ course.issuer }}</p>
               <p v-if="course.dateAttained" class="small text-muted mb-2">{{ formatDate(course.dateAttained) }}</p>
-              <p v-if="course.durationWeeks" class="small text-muted mb-2">
-                {{ course.durationWeeks }} week{{ course.durationWeeks === 1 ? '' : 's' }},
-                {{ course.lessonsPerWeek }} lesson{{ course.lessonsPerWeek === 1 ? '' : 's' }} per week
-                &middot; {{ course.completedStageCount }} stages
+              <p v-if="course.sessionDurationMinutes" class="small text-muted mb-2">
+                One {{ course.sessionDurationMinutes }}-minute lesson
+                &middot; {{ course.completedStageCount }} stage{{ course.completedStageCount === 1 ? '' : 's' }}
               </p>
               <div v-if="course.subskills.length" class="small">
                 <strong>Skills learned</strong>

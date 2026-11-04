@@ -2,8 +2,8 @@
 // (The date maths is worked out on the server, so a wrong clock in the browser can
 // never change who is allowed to cancel or finish a booking.)
 
-const HOUR = 60 * 60 * 1000
-const WEEK = 7 * 24 * HOUR
+const MINUTE = 60 * 1000
+const HOUR = 60 * MINUTE
 
 // A student can cancel (and get the credit back) until this long before the course starts
 export const CANCEL_HOURS_BEFORE = 24
@@ -18,9 +18,10 @@ export function cancelDeadline(startsAt) {
   return new Date(startsAt.getTime() - CANCEL_HOURS_BEFORE * HOUR)
 }
 
-// the first moment the course can be marked finished: the start plus the course length
-export function finishTime(startsAt, durationWeeks) {
-  return new Date(startsAt.getTime() + durationWeeks * WEEK)
+// the first moment the course can be marked finished: a course is one lesson, so the start
+// plus the lesson's length in minutes
+export function finishTime(startsAt, lessonMinutes) {
+  return new Date(startsAt.getTime() + lessonMinutes * MINUTE)
 }
 
 // today's date in Singapore as "2026-11-08" (used for the date on a skill card)

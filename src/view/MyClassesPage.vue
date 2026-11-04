@@ -620,7 +620,7 @@ async function addSlot() {
     @close="closeAll"
   >
     <p v-if="detailsDescription" class="mb-3">{{ detailsDescription }}</p>
-    <p class="small mb-1">Starts {{ formatTime(topBooking.startsAt) }} &middot; {{ topBooking.sessionDurationMinutes }} minutes per session</p>
+    <p class="small mb-1">Starts {{ formatTime(topBooking.startsAt) }} &middot; one {{ topBooking.sessionDurationMinutes }}-minute lesson</p>
     <p class="small mb-1">{{ topBooking.mode === 'online' ? 'Online class' : 'Meets at ' + topBooking.place + ' (' + topBooking.region + ')' }}</p>
     <p v-if="topBooking.mode !== 'online' && topBooking.address" class="small text-muted mb-1">{{ topBooking.address }}</p>
     <p class="small mb-3">{{ creditNote(topBooking) }}</p>

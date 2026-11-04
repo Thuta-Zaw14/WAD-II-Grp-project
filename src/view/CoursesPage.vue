@@ -714,10 +714,7 @@ function resetFilters() {
             <p v-else class="text-muted">Pick a time, then confirm your booking.</p>
 
             <p class="small text-muted">
-              {{ selectedSkill.durationWeeks }} week{{ selectedSkill.durationWeeks === 1 ? '' : 's' }},
-              {{ selectedSkill.lessonsPerWeek }} lesson{{ selectedSkill.lessonsPerWeek === 1 ? '' : 's' }} a week.
-              {{ selectedSkill.sessionDurationMinutes || 60 }} minutes per session.
-              One booking covers the whole course.
+              One {{ selectedSkill.sessionDurationMinutes || 60 }}-minute lesson.
             </p>
 
             <!-- Step 1: select a start time -->

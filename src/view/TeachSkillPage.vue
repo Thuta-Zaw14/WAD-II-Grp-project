@@ -47,9 +47,7 @@ const oldPlace = ref('') // an older course's place, typed by hand before the ma
 const equipmentOption = ref('not_required')
 const difficulty = ref('standard')
 const maxCapacity = ref(5)
-const durationWeeks = ref(4)
-const lessonsPerWeek = ref(1)
-const sessionDurationMinutes = ref(60)
+const sessionDurationMinutes = ref(60) // a course is one lesson: this is how long it is
 const stages = ref([newStage()])
 const slots = ref([]) // [{ date, time, taken }]  taken = students already booked (edit only)
 
@@ -70,8 +68,6 @@ const fieldErrors = reactive({
   title: '',
   location: '',
   maxCapacity: '',
-  durationWeeks: '',
-  lessonsPerWeek: '',
   sessionDurationMinutes: '',
   slotDate: '',
   slotTime: '',
@@ -82,8 +78,6 @@ const touched = reactive({
   title: false,
   location: false,
   maxCapacity: false,
-  durationWeeks: false,
-  lessonsPerWeek: false,
   sessionDurationMinutes: false,
   slotDate: false,
   slotTime: false,
@@ -92,6 +86,15 @@ const stageErrors = ref([''])
 const stageTouched = ref([false])
 
 const physical = computed(() => mode.value === 'physical')
+
+// Students with a running booking (booked, or a reported problem) agreed to this class, so the
+// server refuses changes to the class type, meeting place, equipment, difficulty, lesson
+// duration and stage names (routes/offers.js). The form locks those fields to match.
+const activeBookings = computed(() => (original.value ? original.value.activeBookings || 0 : 0))
+const locked = computed(() => isEdit.value && activeBookings.value > 0)
+// An older course whose place was typed by hand can only get a searched place, which counts as
+// a new place, so it cannot be saved at all while it is locked.
+const lockedOldPlace = computed(() => locked.value && physical.value && !meetingPlace.value)
 
 // The genre comes from the profile skill, so it is shown but cannot be edited here
 const skillGenre = computed(() => {
@@ -111,9 +114,7 @@ const fieldLabels = {
   title: 'Title',
   location: 'Meeting place',
   maxCapacity: 'Maximum students',
-  durationWeeks: 'Course length',
-  lessonsPerWeek: 'Lessons per week',
-  sessionDurationMinutes: 'Session duration',
+  sessionDurationMinutes: 'Lesson duration',
 }
 
 function fieldProblem(field) {
@@ -130,20 +131,10 @@ function fieldProblem(field) {
       ? ''
       : 'Maximum students must be a whole number from 1 to 50.'
   }
-  if (field === 'durationWeeks') {
-    return Number.isInteger(durationWeeks.value) && durationWeeks.value >= 1 && durationWeeks.value <= 52
-      ? ''
-      : 'Course length must be a whole number of weeks (1-52).'
-  }
-  if (field === 'lessonsPerWeek') {
-    return Number.isInteger(lessonsPerWeek.value) && lessonsPerWeek.value >= 1 && lessonsPerWeek.value <= 7
-      ? ''
-      : 'Lessons per week must be a whole number (1-7).'
-  }
   if (field === 'sessionDurationMinutes') {
     return Number.isInteger(sessionDurationMinutes.value) && sessionDurationMinutes.value >= 1 && sessionDurationMinutes.value <= 1440
       ? ''
-      : 'Session duration must be a whole number from 1 to 1440 minutes.'
+      : 'Lesson duration must be a whole number from 1 to 1440 minutes.'
   }
   return ''
 }
@@ -288,8 +279,6 @@ function fillForm(offer) {
   equipmentOption.value = offer.equipmentOption || 'not_required'
   difficulty.value = offer.difficulty || 'standard'
   maxCapacity.value = offer.maxCapacity || 1
-  durationWeeks.value = offer.durationWeeks || 4
-  lessonsPerWeek.value = offer.lessonsPerWeek || 1
   sessionDurationMinutes.value = offer.sessionDurationMinutes || 60
   stages.value = (offer.stages || []).map((st) => newStage(st))
   if (stages.value.length === 0) stages.value = [newStage()]
@@ -391,8 +380,6 @@ async function save() {
       equipmentOption: physical.value ? equipmentOption.value : 'not_required',
       difficulty: difficulty.value,
       maxCapacity: maxCapacity.value,
-      durationWeeks: durationWeeks.value,
-      lessonsPerWeek: lessonsPerWeek.value,
       sessionDurationMinutes: sessionDurationMinutes.value,
       stages: stagesOut,
       slots: slotsOut,
@@ -458,6 +445,18 @@ async function remove() {
           <strong>Could not save:</strong> {{ error }}
         </div>
 
+        <div v-if="locked" class="alert alert-info" role="status">
+          <strong>{{ activeBookings }} student{{ activeBookings === 1 ? ' has' : 's have' }} booked this course.</strong>
+          The class type, meeting place, equipment, difficulty, lesson duration and stage names are
+          locked until their bookings are finished or cancelled. You can still change the title,
+          description, pictures, stage descriptions, maximum students and start times.
+        </div>
+        <div v-if="lockedOldPlace" class="alert alert-warning" role="alert">
+          This course's meeting place was typed in before the map search existed, so it has to be
+          picked again from the search, which counts as a new place. Wait until the bookings are
+          finished or cancelled to edit this course.
+        </div>
+
         <form novalidate @submit.prevent="save">
           <!-- The skill comes from the profile, so the genre is already known -->
           <div class="mb-3">
@@ -499,11 +498,11 @@ async function remove() {
 
           <div class="mb-3">
             <div class="form-check form-check-inline">
-              <input id="mode-physical" v-model="mode" type="radio" value="physical" class="form-check-input" @change="handleModeChange" />
+              <input id="mode-physical" v-model="mode" type="radio" value="physical" class="form-check-input" :disabled="locked" @change="handleModeChange" />
               <label class="form-check-label" for="mode-physical">Physical class</label>
             </div>
             <div class="form-check form-check-inline">
-              <input id="mode-online" v-model="mode" type="radio" value="online" class="form-check-input" @change="handleModeChange" />
+              <input id="mode-online" v-model="mode" type="radio" value="online" class="form-check-input" :disabled="locked" @change="handleModeChange" />
               <label class="form-check-label" for="mode-online">Online class</label>
             </div>
           </div>
@@ -511,7 +510,13 @@ async function remove() {
           <template v-if="physical">
             <!-- The place comes from a map search (OneMap), so it is real and its pin is exact.
                  The region is worked out from it by the server. -->
-            <div class="mb-3">
+            <!-- locked: the saved place, as text -->
+            <div v-if="locked" class="mb-3">
+              <div class="fw-semibold mb-1">Meeting place</div>
+              <p class="mb-0">{{ meetingPlace ? meetingPlace.name : oldPlace }}</p>
+              <small v-if="meetingPlace" class="text-muted">{{ meetingPlace.address }}</small>
+            </div>
+            <div v-else class="mb-3">
               <PlacePicker
                 :model-value="meetingPlace"
                 input-id="class-place"
@@ -525,15 +530,15 @@ async function remove() {
             <div class="mb-3">
               <div class="fw-semibold mb-1">Equipment</div>
               <div class="form-check">
-                <input id="equip-provided" v-model="equipmentOption" type="radio" value="provided" class="form-check-input" />
+                <input id="equip-provided" v-model="equipmentOption" type="radio" value="provided" class="form-check-input" :disabled="locked" />
                 <label class="form-check-label" for="equip-provided">Provided by the teacher (students pay +1 credit)</label>
               </div>
               <div class="form-check">
-                <input id="equip-bring" v-model="equipmentOption" type="radio" value="bring" class="form-check-input" />
+                <input id="equip-bring" v-model="equipmentOption" type="radio" value="bring" class="form-check-input" :disabled="locked" />
                 <label class="form-check-label" for="equip-bring">Students bring their own</label>
               </div>
               <div class="form-check">
-                <input id="equip-not-required" v-model="equipmentOption" type="radio" value="not_required" class="form-check-input" />
+                <input id="equip-not-required" v-model="equipmentOption" type="radio" value="not_required" class="form-check-input" :disabled="locked" />
                 <label class="form-check-label" for="equip-not-required">Equipment is not required</label>
               </div>
             </div>
@@ -542,11 +547,11 @@ async function remove() {
           <div class="mb-3">
             <div class="fw-semibold mb-1">Difficulty</div>
             <div class="form-check">
-              <input id="diff-standard" v-model="difficulty" type="radio" value="standard" class="form-check-input" />
+              <input id="diff-standard" v-model="difficulty" type="radio" value="standard" class="form-check-input" :disabled="locked" />
               <label class="form-check-label" for="diff-standard">Standard</label>
             </div>
             <div class="form-check">
-              <input id="diff-risk" v-model="difficulty" type="radio" value="high_risk" class="form-check-input" />
+              <input id="diff-risk" v-model="difficulty" type="radio" value="high_risk" class="form-check-input" :disabled="locked" />
               <label class="form-check-label" for="diff-risk">High difficulty</label>
             </div>
           </div>
@@ -574,17 +579,7 @@ async function remove() {
 
           <div class="row g-3 mb-3">
             <div class="col-12 col-sm-4">
-              <label class="form-label" for="weeks">Course length (weeks) <span class="required-marker" aria-hidden="true">*</span></label>
-              <input id="weeks" v-model.number="durationWeeks" type="number" min="1" max="52" class="form-control" :class="{ 'is-invalid': fieldErrors.durationWeeks }" :aria-invalid="!!fieldErrors.durationWeeks" :aria-describedby="fieldErrors.durationWeeks ? 'weeks-error' : undefined" required @input="handleFieldChange('durationWeeks')" @blur="handleFieldChange('durationWeeks')" />
-              <div v-if="fieldErrors.durationWeeks" id="weeks-error" class="invalid-feedback d-block">{{ fieldErrors.durationWeeks }}</div>
-            </div>
-            <div class="col-12 col-sm-4">
-              <label class="form-label" for="lessons">Lessons per week <span class="required-marker" aria-hidden="true">*</span></label>
-              <input id="lessons" v-model.number="lessonsPerWeek" type="number" min="1" max="7" class="form-control" :class="{ 'is-invalid': fieldErrors.lessonsPerWeek }" :aria-invalid="!!fieldErrors.lessonsPerWeek" :aria-describedby="fieldErrors.lessonsPerWeek ? 'lessons-error' : undefined" required @input="handleFieldChange('lessonsPerWeek')" @blur="handleFieldChange('lessonsPerWeek')" />
-              <div v-if="fieldErrors.lessonsPerWeek" id="lessons-error" class="invalid-feedback d-block">{{ fieldErrors.lessonsPerWeek }}</div>
-            </div>
-            <div class="col-12 col-sm-4">
-              <label class="form-label" for="session-duration">Session duration (minutes) <span class="required-marker" aria-hidden="true">*</span></label>
+              <label class="form-label" for="session-duration">Lesson duration (minutes) <span class="required-marker" aria-hidden="true">*</span></label>
               <input
                 id="session-duration"
                 v-model.number="sessionDurationMinutes"
@@ -594,7 +589,8 @@ async function remove() {
                 class="form-control"
                 :class="{ 'is-invalid': fieldErrors.sessionDurationMinutes }"
                 :aria-invalid="!!fieldErrors.sessionDurationMinutes"
-                :aria-describedby="fieldErrors.sessionDurationMinutes ? 'session-duration-error' : undefined"
+                :aria-describedby="fieldErrors.sessionDurationMinutes ? 'session-duration-error' : 'session-duration-help'"
+                :disabled="locked"
                 required
                 @input="handleFieldChange('sessionDurationMinutes')"
                 @blur="handleFieldChange('sessionDurationMinutes')"
@@ -602,6 +598,12 @@ async function remove() {
               <div v-if="fieldErrors.sessionDurationMinutes" id="session-duration-error" class="invalid-feedback d-block">
                 {{ fieldErrors.sessionDurationMinutes }}
               </div>
+            </div>
+            <div class="col-12 col-sm-8 d-flex align-items-sm-end">
+              <small id="session-duration-help" class="text-muted">
+                Every course is one lesson. You and the student can confirm it is finished once the
+                lesson is over.
+              </small>
             </div>
           </div>
 
@@ -684,6 +686,7 @@ async function remove() {
           <h2 class="h6">Stages <span class="required-marker" aria-hidden="true">*</span></h2>
           <p class="text-muted small">
             Add at least 1 stage. A course can have up to {{ MAX_STAGES }} stages.
+            <template v-if="locked">The stage names are locked while students are booked, but you can still edit the descriptions.</template>
           </p>
 
           <div v-for="(s, i) in stages" :key="s.key" class="card card-body mb-3">
@@ -692,7 +695,7 @@ async function remove() {
               <button
                 type="button"
                 class="btn btn-sm btn-outline-danger"
-                :disabled="stages.length === 1"
+                :disabled="locked || stages.length === 1"
                 @click="removeStage(i)"
               >
                 Delete stage
@@ -708,6 +711,7 @@ async function remove() {
               :aria-describedby="stageTouched[i] && stageErrors[i] ? 'stage-name-error-' + i : undefined"
               maxlength="60"
               placeholder="Stage name"
+              :disabled="locked"
               required
               @input="handleStageChange(i)"
               @blur="handleStageChange(i)"
@@ -722,7 +726,7 @@ async function remove() {
           <button
             type="button"
             class="btn btn-outline-secondary mb-4"
-            :disabled="stages.length >= MAX_STAGES"
+            :disabled="locked || stages.length >= MAX_STAGES"
             @click="addStage"
           >
             + Add stage
@@ -744,7 +748,7 @@ async function remove() {
           </div>
 
           <div class="d-flex gap-2 flex-wrap">
-            <button class="btn btn-brand" :disabled="saving">
+            <button class="btn btn-brand" :disabled="saving || lockedOldPlace">
               {{ saving ? 'Saving...' : 'Save course' }}
             </button>
             <button type="button" class="btn btn-outline-secondary" :disabled="saving" @click="goToPreviousPage">

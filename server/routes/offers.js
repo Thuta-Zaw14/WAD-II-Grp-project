@@ -94,14 +94,9 @@ function findProblem(body, uid, user, existing) {
   if (!Number.isInteger(body.maxCapacity) || body.maxCapacity < 1 || body.maxCapacity > 50) {
     return 'Maximum students must be a whole number from 1 to 50.'
   }
-  if (!Number.isInteger(body.durationWeeks) || body.durationWeeks < 1 || body.durationWeeks > 52) {
-    return 'Course length must be a whole number of weeks (1-52).'
-  }
-  if (!Number.isInteger(body.lessonsPerWeek) || body.lessonsPerWeek < 1 || body.lessonsPerWeek > 7) {
-    return 'Lessons per week must be a whole number (1-7).'
-  }
+  // A course is one lesson: sessionDurationMinutes is how long that lesson is
   if (!Number.isInteger(body.sessionDurationMinutes) || body.sessionDurationMinutes < 1 || body.sessionDurationMinutes > 1440) {
-    return 'Session duration must be a whole number from 1 to 1440 minutes.'
+    return 'Lesson duration must be a whole number from 1 to 1440 minutes.'
   }
 
   if (!Array.isArray(body.stages) || body.stages.length < 1) return 'A course needs at least 1 stage.'
@@ -258,9 +253,7 @@ function buildOffer(body, uid, user, existing, place) {
     equipmentProvided: equipmentOption === 'provided',
     difficulty: difficulty,
     maxCapacity: body.maxCapacity,
-    durationWeeks: body.durationWeeks,
-    lessonsPerWeek: body.lessonsPerWeek,
-    sessionDurationMinutes: body.sessionDurationMinutes,
+    sessionDurationMinutes: body.sessionDurationMinutes, // the length of the course's one lesson
     stages: stages,
     slots: buildSlots(body.slots, body.maxCapacity, existing),
     creditCost: creditCost, // paid by the student when booking; goes to the teacher when the course is finished
@@ -289,6 +282,52 @@ async function titleTaken(uid, title, exceptId) {
   return false
 }
 
+// ---------- What cannot change once students have booked ----------
+
+// a booking that is still running: the student is waiting for the class, or an admin is
+// looking at a reported problem
+function isActive(booking) {
+  return booking.status === 'booked' || booking.status === 'disputed'
+}
+
+// true if both lists have the same stage names in the same order
+function sameStageNames(savedStages, newStages) {
+  const saved = savedStages || []
+  if (saved.length !== newStages.length) return false
+  for (let i = 0; i < saved.length; i++) {
+    if ((saved[i].name || '').trim() !== newStages[i].name) return false
+  }
+  return true
+}
+
+// What a student agreed to when they booked. While someone has an active booking these cannot
+// change, or the student would suddenly have a different class (and reflections are kept by
+// stage number, so renamed or reordered stages would get the wrong ones). Labels (title,
+// description, skill), stage descriptions, maximum students and start times can still change.
+// saved = the course in the database, offer = the edited course from buildOffer
+// -> what was changed, e.g. ['the meeting place', 'the lesson duration'] (empty = fine)
+function lockedChanges(saved, offer) {
+  const changed = []
+  if ((saved.mode || '') !== offer.mode) {
+    changed.push('the class type')
+  } else if (offer.mode === 'physical') {
+    const samePin = saved.lat === offer.lat && saved.lng === offer.lng && saved.address === offer.address
+    if (!samePin) changed.push('the meeting place')
+  }
+  if ((saved.equipmentOption || 'not_required') !== offer.equipmentOption) changed.push('the equipment')
+  if ((saved.difficulty || 'standard') !== offer.difficulty) changed.push('the difficulty')
+  const savedMinutes = Number.isInteger(saved.sessionDurationMinutes) ? saved.sessionDurationMinutes : 60
+  if (savedMinutes !== offer.sessionDurationMinutes) changed.push('the lesson duration')
+  if (!sameStageNames(saved.stages, offer.stages)) changed.push('the stage names')
+  return changed
+}
+
+// ['a', 'b', 'c'] -> "a, b and c"
+function listText(items) {
+  if (items.length === 1) return items[0]
+  return items.slice(0, -1).join(', ') + ' and ' + items[items.length - 1]
+}
+
 // ---------- Routes ----------
 
 // Every course (the home page filters and searches in the browser)
@@ -302,15 +341,22 @@ router.get('/', verifyToken, async (req, res) => {
 })
 
 // My own courses (for the profile page and the edit form).
+// Each one also says how many of its bookings are still running (activeBookings), so the edit
+// form can show which fields are locked.
 // This route must stay above '/:id'.
 router.get('/mine', verifyToken, async (req, res) => {
   const result = await findDocsWhereEquals('offers', 'teacherUid', req.user.uid)
-  if (!result.status) {
+  const bookings = await findDocsWhereEquals('bookings', 'teacherUid', req.user.uid)
+  if (!result.status || !bookings.status) {
     return res.status(500).json({ error: 'Could not load your courses.' })
+  }
+  const activeCount = {} // course id -> active bookings
+  for (const booking of bookings.docs) {
+    if (isActive(booking)) activeCount[booking.offerId] = (activeCount[booking.offerId] || 0) + 1
   }
   const list = []
   for (const offer of result.docs) {
-    list.push(publicOffer(offer, req.user.uid))
+    list.push({ ...publicOffer(offer, req.user.uid), activeBookings: activeCount[offer.id] || 0 })
   }
   list.sort((a, b) => ((a.createdAt || '') < (b.createdAt || '') ? 1 : -1)) // newest first
   res.json(list)
@@ -443,10 +489,28 @@ router.put('/:id', verifyToken, async (req, res) => {
   // OUTSIDE THE SLIDES: a student can book while this request is running. So the slots are
   // worked out again from the newest copy of the course, and saved inside a transaction
   // (see models/bookings.js), so a booking that just happened is never wiped out.
+  // The course's bookings are read inside the same transaction, so a student who books at
+  // this very moment is counted before the locked fields are checked.
   const outcome = await db.runTransaction(async (t) => {
     const freshSnap = await t.get(ref)
     if (!freshSnap.exists) return { status: 404, error: 'Course not found.' }
     const fresh = { id: freshSnap.id, ...freshSnap.data() }
+    const bookingsSnap = await t.get(db.collection('bookings').where('offerId', '==', ref.id))
+
+    let active = 0
+    for (const doc of bookingsSnap.docs) {
+      if (isActive(doc.data())) active++
+    }
+    if (active > 0) {
+      const changed = lockedChanges(fresh, offer)
+      if (changed.length > 0) {
+        return {
+          status: 409,
+          error: 'Students have booked this course, so ' + listText(changed) + " can't be changed until " +
+            'their bookings are finished or cancelled.',
+        }
+      }
+    }
 
     offer.slots = buildSlots(req.body.slots, offer.maxCapacity, fresh)
     const slotProblem = findSlotProblem(offer.slots, offer.maxCapacity, fresh)
@@ -459,7 +523,7 @@ router.put('/:id', verifyToken, async (req, res) => {
     return res.status(outcome.status).json({ error: outcome.error })
   }
 
-  // the students who booked it see the new details on My Classes (models/bookings.js).
+  // the students who booked it see the new title and names on My Classes (models/bookings.js).
   // The course itself is already saved, so a problem here is only logged.
   try {
     await syncBookingsWithOffer(existing.id, offer)
