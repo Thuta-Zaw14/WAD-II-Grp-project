@@ -16,6 +16,7 @@ import TeachSkillPage from '../view/TeachSkillPage.vue'
 import LearnSkillPage from '../view/LearnSkillPage.vue'
 import AdminPage from '../view/AdminPage.vue'
 import AdminUserProfilePage from '../view/AdminUserProfilePage.vue'
+import NotFoundPage from '../view/NotFoundPage.vue'
 import { auth } from '../firebase'
 import { checkAdmin, errorText } from '../services/api'
 import { useToastStore } from '../stores/toast'
@@ -47,11 +48,25 @@ const router = createRouter({
     // only admins (meta.requiresAdmin is checked by the guard below)
     { path: '/admins', component: AdminPage, meta: { requiresAdmin: true } },
     { path: '/admins/users/:uid', component: AdminUserProfilePage, meta: { requiresAdmin: true } },
+    // any other address (e.g. /profile/bob): "Page not found." Public, so it shows logged in or out.
+    // It must stay the LAST route, because it matches everything.
+    { path: '/:pathMatch(.*)*', name: 'not-found', component: NotFoundPage, meta: { public: true } },
   ],
 })
 
+// The "Page not found." page, keeping the address that was typed (so the admin pages look like
+// they do not exist to someone who is not an admin, instead of hinting that they are there)
+function notFound(to) {
+  return {
+    name: 'not-found',
+    params: { pathMatch: to.path.substring(1).split('/') },
+    query: to.query,
+    hash: to.hash,
+  }
+}
+
 // Navigation guard: every page except the landing and login pages needs someone logged in, and the admin
-// pages are only opened for admins. Everyone else is sent home.
+// pages are only opened for admins. Everyone else gets "Page not found." there.
 // This only decides which PAGE is shown. The real lock is on the server (verifyToken.js and
 // verifyAdmin.js): even if someone got past this, every route there would still say no.
 router.beforeEach(async (to) => {
@@ -64,7 +79,7 @@ router.beforeEach(async (to) => {
 
   try {
     const result = await checkAdmin()
-    return result.isAdmin ? true : '/home'
+    return result.isAdmin ? true : notFound(to)
   } catch (err) {
     // not a "no": we could not ask (e.g. the network is down), so say so instead of failing silently
     useToastStore().show('Could not check admin access: ' + errorText(err))
