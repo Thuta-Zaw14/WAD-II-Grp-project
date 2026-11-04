@@ -10,6 +10,7 @@ import { auth } from './firebase'
 import { useProfileStore } from './stores/profile'
 import { useOffersStore } from './stores/offers'
 import { useBookingsStore } from './stores/bookings'
+import { useReportsStore } from './stores/reports'
 import { startIdleWatch, stopIdleWatch } from './services/idleLogout'
 
 const app = createApp(App)
@@ -26,6 +27,7 @@ onAuthStateChanged(auth, (user) => {
     useProfileStore().reset()
     useOffersStore().reset()
     useBookingsStore().reset()
+    useReportsStore().reset()
   }
   lastUid = uid
 

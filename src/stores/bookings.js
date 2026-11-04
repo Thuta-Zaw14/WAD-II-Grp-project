@@ -1,9 +1,10 @@
 import { ref, computed } from 'vue'
 import { defineStore } from 'pinia'
 import {
-  getMyBookings, bookSlot, cancelBooking, confirmBooking, reportBooking, removeStudent,
-  submitStageReflection, approveBookingStage, errorText,
+  getMyBookings, bookSlot, cancelBooking, confirmBooking, reportBooking, removeStudent, markSeenByTeacher,
+  markSeenByLearner, submitStageReflection, approveBookingStage, errorText,
 } from '../services/api'
+import { learnerActionCount, studentActionCount } from '../services/attention'
 import { useOffersStore } from './offers'
 import { useProfileStore } from './profile'
 import { useToastStore } from './toast'
@@ -23,6 +24,22 @@ export const useBookingsStore = defineStore('bookings', () => {
   // getters
   const learning = computed(() => bookings.value.filter((b) => b.role === 'learner'))
   const teaching = computed(() => bookings.value.filter((b) => b.role === 'teacher'))
+
+  // students who cancelled one of my classes, that I have not dismissed yet (newest first)
+  const cancelNotices = computed(() =>
+    teaching.value
+      .filter((b) => b.cancelNotice)
+      .sort((a, b) => (a.cancelledAt < b.cancelledAt ? 1 : -1))
+  )
+
+  // The red numbers (see services/attention.js). Classes I attend: unread messages and newly
+  // approved stages. Classes I host: reflections to approve, unread messages, new students and
+  // cancellations. Together they are the number on "My Classes" in the nav bar.
+  const learningAlertCount = computed(() => learning.value.reduce((total, b) => total + learnerActionCount(b), 0))
+  const teachingAlertCount = computed(
+    () => teaching.value.reduce((total, b) => total + studentActionCount(b), 0) + cancelNotices.value.length
+  )
+  const attentionCount = computed(() => learningAlertCount.value + teachingAlertCount.value)
 
   // credits taken from me that are still waiting for the course to finish
   const heldCredits = computed(() =>
@@ -207,10 +224,46 @@ export const useBookingsStore = defineStore('bookings', () => {
     busyId.value = ''
   }
 
+  // the teacher pressed "Got it" on a cancellation notice
+  async function dismissNotice(id) {
+    try {
+      const data = await markSeenByTeacher(id)
+      replaceBooking(data.booking)
+    } catch (err) {
+      useToastStore().show('Could not dismiss the notice: ' + errorText(err))
+    }
+  }
+
+  // The teacher opened a course's Students list: the students who just joined are no longer new.
+  // Quiet if it fails (the student simply stays marked new until next time).
+  async function markStudentsSeen(offerId) {
+    const fresh = teaching.value.filter((b) => b.offerId === offerId && b.newStudent)
+    for (const b of fresh) {
+      try {
+        const data = await markSeenByTeacher(b.id)
+        replaceBooking(data.booking)
+      } catch (err) {
+        console.log('Could not mark the student as seen:', errorText(err))
+      }
+    }
+  }
+
+  // The student opened a class's Details: its newly approved stages are no longer new.
+  // Quiet if it fails (the number simply stays until next time).
+  async function markApprovalsSeen(id) {
+    try {
+      const data = await markSeenByLearner(id)
+      replaceBooking(data.booking)
+    } catch (err) {
+      console.log('Could not mark the approvals as seen:', errorText(err))
+    }
+  }
+
   return {
     bookings, loading, error, actionError, busyId, booking,
-    learning, teaching, heldCredits,
+    learning, teaching, heldCredits, cancelNotices,
+    learningAlertCount, teachingAlertCount, attentionCount,
     fetchBookings, refreshBookings, book, cancel, confirm, report, remove, reset,
-    submitReflection, approveStage,
+    submitReflection, approveStage, dismissNotice, markStudentsSeen, markApprovalsSeen,
   }
 })

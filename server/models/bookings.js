@@ -179,7 +179,13 @@ export async function approveBookingStage(uid, bookingId, stageIndex) {
 
     const now = new Date().toISOString()
     progress[stageIndex] = { ...progress[stageIndex], approved: true, approvedAt: now }
-    const changes = { stageProgress: progress, progressUpdatedAt: now, updatedAt: now }
+    const changes = {
+      stageProgress: progress,
+      progressUpdatedAt: now,
+      // a red number for the student until they open the class's Details (markSeenByLearner)
+      learnerUnseenApprovals: (booking.learnerUnseenApprovals || 0) + 1,
+      updatedAt: now,
+    }
     t.update(bookingRef, changes)
 
     return { booking: { id: bookingId, ...booking, ...changes } }
@@ -272,6 +278,7 @@ export async function bookSlot(uid, offerId, slotId) {
       finishAfter: finishTime(startsAt, details.durationWeeks).toISOString(), // when both people can confirm it is finished
       creditCost: cost, // the price at the time of booking, even if the teacher changes it later
       status: 'booked',
+      teacherSeenJoin: false, // a red number for the teacher until they open the course's Students list
       learnerConfirmed: false,
       teacherConfirmed: false,
       createdAt: nowText,
@@ -321,7 +328,13 @@ export async function cancelBooking(uid, bookingId) {
     if (!refunded && !teacherSnap.exists) return fail(409, "The teacher's account could not be found, so this class cannot be cancelled now.")
 
     // --- writes ---
-    const changes = { status: 'cancelled', cancelledAt: now.toISOString(), refunded: refunded, updatedAt: now.toISOString() }
+    const changes = {
+      status: 'cancelled',
+      cancelledAt: now.toISOString(),
+      refunded: refunded,
+      teacherNoticeSeen: false, // the teacher is told on Home and My Classes until they dismiss it
+      updatedAt: now.toISOString(),
+    }
     t.update(bookingRef, changes)
     if (refunded) {
       t.update(learnerRef, { credits: (learnerSnap.data().credits || 0) + booking.creditCost })
@@ -350,6 +363,41 @@ export async function cancelBooking(uid, bookingId) {
 
     return { booking: { id: bookingId, ...booking, ...changes }, offer: offer }
   })
+}
+
+// ---------- The teacher has seen this booking (the red numbers on Home, My Classes, the nav bar) ----------
+// Called when the teacher opens the Students list of a course (a student who just joined is no
+// longer new) and when they press "Got it" on the notice that a student cancelled.
+export async function markSeenByTeacher(uid, bookingId) {
+  const bookingRef = db.collection('bookings').doc(bookingId)
+  const snapshot = await bookingRef.get()
+  if (!snapshot.exists) return fail(404, 'Booking not found.')
+  const booking = snapshot.data()
+  if (booking.teacherUid !== uid) return fail(403, 'Only the teacher can do this.')
+
+  const nowText = new Date().toISOString()
+  const changes = { teacherSeenJoin: true }
+  if (booking.status === 'cancelled') {
+    changes.teacherNoticeSeen = true
+    changes.teacherNoticeSeenAt = nowText
+  }
+  await bookingRef.update(changes)
+  return { booking: { id: bookingId, ...booking, ...changes } }
+}
+
+// ---------- The student has seen this booking ----------
+// Called when the student opens the class's Details: the stages the teacher approved since
+// they last looked are no longer new.
+export async function markSeenByLearner(uid, bookingId) {
+  const bookingRef = db.collection('bookings').doc(bookingId)
+  const snapshot = await bookingRef.get()
+  if (!snapshot.exists) return fail(404, 'Booking not found.')
+  const booking = snapshot.data()
+  if (booking.learnerUid !== uid) return fail(403, 'Only the student can do this.')
+
+  const changes = { learnerUnseenApprovals: 0 }
+  await bookingRef.update(changes)
+  return { booking: { id: bookingId, ...booking, ...changes } }
 }
 
 // ---------- The teacher removes a student from the class (any time while it is active) ----------

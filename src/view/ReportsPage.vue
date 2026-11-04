@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import { auth } from '../firebase'
 import { getMyReports, createReport, markReportSeen, searchReportTargets, errorText } from '../services/api'
 import { useToastStore } from '../stores/toast'
+import { useReportsStore } from '../stores/reports'
 import NavBar from '../components/NavBar.vue'
 import LoadingText from '../components/LoadingText.vue'
 import EmptyState from '../components/EmptyState.vue'
@@ -15,6 +16,7 @@ const props = defineProps({
 })
 
 const router = useRouter()
+const reportsStore = useReportsStore() // the red number on "Report" in the nav bar
 const toast = useToastStore()
 
 // The reports are kept here, not in a store: nobody else needs them, and this way
@@ -83,6 +85,7 @@ async function toggle(report) {
     report.hasNews = false // take the "!" off straight away
     try {
       await markReportSeen(report.id)
+      reportsStore.refreshNews() // and the red number on "Report" in the nav bar
     } catch (err) {
       console.log('Could not mark the report as seen:', errorText(err))
     }

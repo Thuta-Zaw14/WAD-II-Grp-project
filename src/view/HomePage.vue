@@ -5,6 +5,7 @@ import { auth } from '../firebase'
 import { useProfileStore } from '../stores/profile'
 import { useBookingsStore } from '../stores/bookings'
 import NavBar from '../components/NavBar.vue'
+import CancelNotices from '../components/CancelNotices.vue'
 
 // The page you land on after logging in: a personal welcome, a short getting-started
 // tutorial, and shortcuts to the main parts of the app.
@@ -207,6 +208,9 @@ const shortcuts = [
         <li v-for="(w, i) in warnings" :key="i">{{ w.reason }}</li>
       </ul>
     </div>
+
+    <!-- students who cancelled one of my classes, and where the credits went -->
+    <CancelNotices />
 
     <!-- Personal welcome -->
     <section class="welcome mb-4">
