@@ -86,6 +86,7 @@ const categoryColors = {
 const userPos = ref(null) // { lat, lng } once we know where you are
 const userRegion = ref('')
 const locationError = ref('')
+const locating = ref(false) // waiting for the browser to say where you are
 let youMarker = null
 
 // Work out the region from coordinates (rough cut-offs, not official borders).
@@ -113,8 +114,10 @@ function findMe() {
     locationError.value = 'Your browser cannot share your location.'
     return
   }
+  locating.value = true
   navigator.geolocation.getCurrentPosition(
     (pos) => {
+      locating.value = false
       if (!map) return // the answer came after the person left this page
       const lat = pos.coords.latitude
       const lng = pos.coords.longitude
@@ -125,6 +128,7 @@ function findMe() {
       youMarker = L.circleMarker([lat, lng], { radius: 8, color: 'blue' }).addTo(map)
     },
     () => {
+      locating.value = false
       locationError.value = 'Could not get your location. Allow location access in your browser.'
     }
   )
@@ -471,20 +475,42 @@ function resetFilters() {
         >{{ r }}</button>
       </div>
 
-      <p class="small mb-0">
-        <a v-if="!userPos" href="#" @click.prevent="findMe">Sort by distance from me</a>
-        <template v-else>
-          <span class="text-muted">You're in the {{ userRegion }} region. Closest first.</span>
-          <a href="#" class="ms-2" @click.prevent="clearLocation">Clear</a>
-        </template>
+      <!-- Sort by distance: a pill like the filters above; dark brown while it is on -->
+      <div class="d-flex align-items-center flex-wrap gap-2">
+        <span class="small text-muted filter-label">Sort</span>
+        <button
+          v-if="!userPos"
+          type="button"
+          class="filter near-me"
+          :disabled="locating"
+          @click="findMe"
+        >
+          <svg class="pin" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M12 2a7 7 0 0 0-7 7c0 5.25 7 13 7 13s7-7.75 7-13a7 7 0 0 0-7-7zm0 9.5a2.5 2.5 0 1 1 0-5 2.5 2.5 0 0 1 0 5z" />
+          </svg>
+          {{ locating ? 'Finding you...' : 'Sort by distance' }}
+        </button>
+        <button
+          v-else
+          type="button"
+          class="filter near-me active"
+          aria-label="Stop sorting by distance"
+          @click="clearLocation"
+        >
+          <svg class="pin" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M12 2a7 7 0 0 0-7 7c0 5.25 7 13 7 13s7-7.75 7-13a7 7 0 0 0-7-7zm0 9.5a2.5 2.5 0 1 1 0-5 2.5 2.5 0 0 1 0 5z" />
+          </svg>
+          Closest first &middot; {{ userRegion }} region
+          <span class="near-me-clear" aria-hidden="true">&times;</span>
+        </button>
         <a
           v-if="selectedCategory !== 'All' || selectedRegion !== 'All'"
           href="#"
-          class="ms-3"
+          class="small ms-2"
           @click.prevent="resetFilters"
         >Reset filters</a>
-        <span v-if="locationError" class="ms-2 text-danger">{{ locationError }}</span>
-      </p>
+      </div>
+      <p v-if="locationError" class="small text-danger mt-2 mb-0">{{ locationError }}</p>
     </div>
 
     <!-- On a phone the map shows first, then the list. On desktop they sit side by side. -->
@@ -816,6 +842,35 @@ function resetFilters() {
   background: var(--k-accent);
   border-color: var(--k-accent);
   color: var(--k-on-accent);
+}
+
+/* the "Sort by distance" pill: light brown with a map pin, dark brown (.active) while on */
+.near-me {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--k-brand-soft);
+  border-color: var(--k-brand);
+  color: var(--k-accent);
+}
+
+.near-me:disabled {
+  opacity: 0.7;
+  cursor: progress;
+}
+
+.pin {
+  width: 14px;
+  height: 14px;
+  fill: currentColor;
+  flex-shrink: 0;
+}
+
+.near-me-clear {
+  margin-left: 2px;
+  font-size: 15px;
+  line-height: 1;
+  opacity: 0.8;
 }
 
 /* Small coloured dot for each genre */
