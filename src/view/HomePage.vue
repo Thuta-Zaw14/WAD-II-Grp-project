@@ -124,7 +124,7 @@ const steps = computed(() => [
     icon: '📅',
     title: 'Book your first session',
     text: 'Pick a start time and confirm. The credits are held, not spent, until you and your coach both mark the course finished.',
-    tip: 'You can cancel for a full refund until 24 hours before the course starts.',
+    tip: 'You can cancel for a full refund until 24 hours before the start, and move to another start time until 2 hours before.',
     action: 'Find something to book',
     to: '/courses',
     done: bookingsStore.learning.length > 0,
@@ -209,7 +209,7 @@ const shortcuts = [
       </ul>
     </div>
 
-    <!-- students who cancelled one of my classes, and where the credits went -->
+    <!-- classes that were cancelled or moved (by a student, or by the teacher) -->
     <CancelNotices />
 
     <!-- Personal welcome -->

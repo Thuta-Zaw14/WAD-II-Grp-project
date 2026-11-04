@@ -9,10 +9,15 @@
 //   status 'finished'  -> the student AND the teacher confirmed. The teacher gets the credit
 //                         and the student gets a skill card. If the student was invited by a friend
 //                         and this is their first finished course, the friend is rewarded too.
-//   status 'cancelled' -> the student cancelled before the start, or the teacher removed the
-//                         student from the class (cancelledBy 'teacher'). Refunded, except when the
-//                         student cancelled less than 24 hours before the start (refunded: false):
-//                         then the held credits go to the teacher. Either way the seat is freed.
+//   status 'cancelled' -> the student cancelled (until 24 hours before the start), the teacher
+//                         removed the student (Kick), or the teacher cancelled the whole start time
+//                         (cancelledBy 'teacher'). Always refunded, and the seat is freed. (Bookings
+//                         saved with refunded: false come from an older rule that paid the teacher
+//                         for a late cancel; they are only shown, never made any more.)
+//
+// A booking can also be MOVED to another start time of the same course: by the student
+// (moveBooking) or, for everyone at that time, by the teacher (moveStartTime). The credits, the
+// chat and the reflections stay with the booking. The rules are in bookingRules.js.
 //   status 'disputed'  -> someone reported a problem. The credit stays held until an admin settles
 //                         it (Disputes tab of the admin page): either the teacher is paid (the
 //                         booking becomes 'finished', with resolution 'teacher-paid') or the
@@ -30,7 +35,10 @@
 import { db } from '../config/firebaseAdmin.js'
 import { findDocsWhereEquals } from './dbQuery.js'
 import { MAX_REFERRAL_REWARDS, REFERRAL_REWARD_INVITER, REFERRAL_REWARD_FRIEND } from '../config/credits.js'
-import { slotMoment, cancelDeadline, finishTime, singaporeDate, describeMoment, roleOf, phaseOf } from './bookingRules.js'
+import {
+  slotMoment, cancelDeadline, finishTime, singaporeDate, describeMoment, roleOf, phaseOf,
+  moveDeadline, earliestNewTime, freeCancelUntil, MAX_MOVES, MOVE_HOURS_BEFORE, NEW_TIME_HOURS_AHEAD,
+} from './bookingRules.js'
 
 const MAX_OPEN_REPORTS = 2 // reports one person can have waiting for an admin at the same time
 
@@ -302,7 +310,12 @@ export async function bookSlot(uid, offerId, slotId) {
   })
 }
 
-// ---------- Cancel (the student only, until 24 hours before the start) ----------
+// ---------- Cancel (the student only, for a full refund) ----------
+// Allowed until 24 hours before the start. Two exceptions (see freeCancelUntil in bookingRules.js):
+// if the TEACHER moved the class, until it starts; if the student moved it within the last 24
+// hours before its start, not at all. A cancel never pays the teacher: credits only reach a teacher
+// through a finished class or an admin's decision. A student who can't come after that can message
+// the teacher (who can remove them with a full refund) or report a problem once it has started.
 export async function cancelBooking(uid, bookingId) {
   const bookingRef = db.collection('bookings').doc(bookingId)
 
@@ -321,35 +334,34 @@ export async function cancelBooking(uid, bookingId) {
     if (now >= startsAt) {
       return fail(409, 'This class has already started, so it can no longer be cancelled. Use "Report a problem" if something went wrong.')
     }
-    // More than 24 hours before the start: the held credits go back to the student. Later than
-    // that (until the start) the student can still give up the seat, but the credits go to the
-    // teacher, who kept the time free for them.
-    const refunded = now < cancelDeadline(startsAt)
+    const deadline = freeCancelUntil(booking)
+    if (deadline === null) {
+      return fail(409, 'You moved this class less than 24 hours before it started, so it can no longer be cancelled. If you can\'t come, message ' + booking.teacherName + ': they can remove you with a full refund.')
+    }
+    if (now >= deadline) {
+      return fail(409, 'Free cancellation ended 24 hours before the start. If you can\'t come, move it to another time or message ' + booking.teacherName + ': they can remove you with a full refund.')
+    }
 
     const offerRef = db.collection('offers').doc(booking.offerId)
     const learnerRef = db.collection('users').doc(uid)
-    const teacherRef = db.collection('users').doc(booking.teacherUid)
     const offerSnap = await t.get(offerRef)
     const learnerSnap = await t.get(learnerRef)
-    const teacherSnap = await t.get(teacherRef)
-    // without the account there is nowhere to put the credits, so do not cancel and lose them
-    if (refunded && !learnerSnap.exists) return fail(409, "Your account could not be found, so the credit cannot be refunded.")
-    if (!refunded && !teacherSnap.exists) return fail(409, "The teacher's account could not be found, so this class cannot be cancelled now.")
+    // without the account there is nowhere to put the refund, so do not cancel and lose the credit
+    if (!learnerSnap.exists) return fail(409, 'Your account could not be found, so the credit cannot be refunded.')
 
     // --- writes ---
     const changes = {
       status: 'cancelled',
       cancelledAt: now.toISOString(),
-      refunded: refunded,
-      teacherNoticeSeen: false, // the teacher is told on Home and My Classes until they dismiss it
+      refunded: true,
+      teacherNotice: 'cancelled', // the teacher is told on Home and My Classes until they dismiss it
+      teacherNoticeSeen: false,
+      teacherNoticeAt: now.toISOString(),
+      learnerNoticeSeen: true, // anything the teacher told the student is old news now
       updatedAt: now.toISOString(),
     }
     t.update(bookingRef, changes)
-    if (refunded) {
-      t.update(learnerRef, { credits: (learnerSnap.data().credits || 0) + booking.creditCost })
-    } else {
-      t.update(teacherRef, { credits: (teacherSnap.data().credits || 0) + booking.creditCost })
-    }
+    t.update(learnerRef, { credits: (learnerSnap.data().credits || 0) + booking.creditCost })
 
     let offer = null
     if (offerSnap.exists) {
@@ -374,9 +386,300 @@ export async function cancelBooking(uid, bookingId) {
   })
 }
 
+function hoursText(hours) {
+  return hours + ' hour' + (hours === 1 ? '' : 's')
+}
+
+// How long a booking lasts (from its start until it can be marked finished). A move keeps this
+// length. It is read from the booking itself, because bookings made before courses became one
+// lesson can last several weeks.
+function lengthOf(booking) {
+  const length = new Date(booking.finishAfter).getTime() - new Date(booking.startsAt).getTime()
+  if (Number.isFinite(length) && length > 0) return length
+  return (booking.sessionDurationMinutes || 60) * 60 * 1000
+}
+
+// ---------- Move (the student moves their booking to another start time of the same course) ----------
+// Allowed until 2 hours before the current start, to a start time with a free seat that is more
+// than 24 hours away, at most twice per booking. A move made within the last 24 hours before the
+// start marks the booking "moved late": it can then no longer be cancelled (otherwise a late move
+// followed by a cancel would get round the 24-hour cancel rule). The teacher gets a notice.
+export async function moveBooking(uid, bookingId, newSlotId) {
+  const bookingRef = db.collection('bookings').doc(bookingId)
+
+  return db.runTransaction(async (t) => {
+    // --- reads ---
+    const bookingSnap = await t.get(bookingRef)
+    if (!bookingSnap.exists) return fail(404, 'Booking not found.')
+    const booking = bookingSnap.data()
+
+    const role = roleOf(booking, uid)
+    if (role === '') return fail(403, 'This is not your booking.')
+    if (role !== 'learner') return fail(403, 'Only the student can move a booking. To move a whole start time, use "Start times" on My Classes.')
+    if (booking.status !== 'booked') return fail(409, 'This booking is ' + booking.status + '.')
+
+    const offerRef = db.collection('offers').doc(booking.offerId)
+    const offerSnap = await t.get(offerRef)
+    if (!offerSnap.exists) return fail(404, 'Course not found.')
+    const slots = offerSnap.data().slots || []
+
+    // --- checks ---
+    const now = new Date()
+    const oldStart = new Date(booking.startsAt)
+    if (now >= moveDeadline(oldStart)) {
+      return fail(409, 'A class can be moved until ' + hoursText(MOVE_HOURS_BEFORE) + ' before it starts.')
+    }
+    const moves = booking.studentMoves || 0
+    if (moves >= MAX_MOVES) return fail(409, 'You have already moved this class ' + MAX_MOVES + ' times.')
+    if (newSlotId === booking.slotId) return fail(400, 'That is already your start time.')
+
+    let newSlot = null
+    for (const slot of slots) {
+      if (slot.id === newSlotId) newSlot = slot
+    }
+    if (newSlot === null) return fail(404, 'That start time no longer exists.')
+    const newStart = slotMoment(newSlot.date, newSlot.time)
+    if (newStart <= earliestNewTime(now)) {
+      return fail(409, 'Pick a start time more than ' + hoursText(NEW_TIME_HOURS_AHEAD) + ' from now.')
+    }
+    if (bookedByOf(newSlot).length >= (newSlot.capacity || 1)) return fail(409, 'That start time is full.')
+
+    // --- writes ---
+    // the seat moves: off the old start time, onto the new one
+    const newSlots = []
+    for (const slot of slots) {
+      if (slot.id === booking.slotId) {
+        const stillBooked = []
+        for (const other of bookedByOf(slot)) {
+          if (other !== uid) stillBooked.push(other)
+        }
+        newSlots.push({ ...slot, bookedBy: stillBooked })
+      } else if (slot.id === newSlotId) {
+        newSlots.push({ ...slot, bookedBy: [...bookedByOf(slot), uid] })
+      } else {
+        newSlots.push(slot)
+      }
+    }
+    t.update(offerRef, { slots: newSlots })
+
+    const nowText = now.toISOString()
+    const changes = {
+      slotId: newSlotId,
+      slotDate: newSlot.date,
+      slotTime: newSlot.time,
+      startsAt: newStart.toISOString(),
+      finishAfter: new Date(newStart.getTime() + lengthOf(booking)).toISOString(),
+      studentMoves: moves + 1,
+      // moved within the last 24 hours before the start: no cancelling from now on
+      movedLate: booking.movedLate === true || now >= cancelDeadline(oldStart),
+      teacherMoved: false, // the student picked this time themselves
+      teacherNotice: 'moved', // the teacher is told on Home and My Classes until they dismiss it
+      teacherNoticeSeen: false,
+      teacherNoticeFrom: booking.startsAt,
+      teacherNoticeTo: newStart.toISOString(),
+      teacherNoticeAt: nowText,
+      learnerNoticeSeen: true, // anything the teacher told the student is old news now
+      updatedAt: nowText,
+    }
+    t.update(bookingRef, changes)
+
+    return {
+      booking: { id: bookingId, ...booking, ...changes },
+      offer: { id: offerSnap.id, ...offerSnap.data(), slots: newSlots },
+    }
+  })
+}
+
+// ---------- The teacher moves or cancels a whole start time ----------
+// One start time can hold several students, so these act on all of them at once.
+// Nobody booked: the start time is simply changed or removed (a new time must still be in the future).
+// Students booked:
+//   - move: until 2 hours before the start, to a new time more than 24 hours away, at most twice per
+//     start time. Each student gets a notice and may cancel for a full refund until the new start,
+//     because they never agreed to it. An optional note from the teacher goes with the notice.
+//   - cancel: until the start, with a reason. Every student is refunded in full and gets a notice;
+//     the start time is removed.
+
+// The open bookings of one start time. Read INSIDE the transaction t (OUTSIDE THE SLIDES: a query
+// in a transaction), so a student who books this time at the same moment is counted too.
+async function bookingsOfSlot(t, offerId, slotId) {
+  const snapshot = await t.get(db.collection('bookings').where('offerId', '==', offerId))
+  const list = []
+  for (const doc of snapshot.docs) {
+    const booking = doc.data()
+    if (booking.slotId === slotId && booking.status === 'booked') list.push({ id: doc.id, ...booking })
+  }
+  return list
+}
+
+function findSlot(slots, slotId) {
+  for (const slot of slots) {
+    if (slot.id === slotId) return slot
+  }
+  return null
+}
+
+// newDate / newTime are already checked by the route ("2026-11-08", "14:00"); note may be ''
+export async function moveStartTime(uid, offerId, slotId, newDate, newTime, note) {
+  const offerRef = db.collection('offers').doc(offerId)
+
+  return db.runTransaction(async (t) => {
+    // --- reads ---
+    const offerSnap = await t.get(offerRef)
+    if (!offerSnap.exists) return fail(404, 'Course not found.')
+    const offer = offerSnap.data()
+    if (offer.teacherUid !== uid) return fail(403, 'This is not your course.')
+
+    const slots = offer.slots || []
+    const slot = findSlot(slots, slotId)
+    if (slot === null) return fail(404, 'That start time no longer exists.')
+    const students = await bookingsOfSlot(t, offerId, slotId)
+
+    // --- checks ---
+    const now = new Date()
+    const oldStart = slotMoment(slot.date, slot.time)
+    if (oldStart <= now) return fail(409, 'This start time has already begun, so it can no longer be moved.')
+    const newId = newDate + '-' + newTime
+    if (newId === slotId) return fail(400, 'That is the same start time.')
+    if (findSlot(slots, newId) !== null) return fail(409, 'This course already starts at that time.')
+    const newStart = slotMoment(newDate, newTime)
+    if (newStart <= now) return fail(400, 'The new start time must be in the future.')
+
+    const hasStudents = students.length > 0 || bookedByOf(slot).length > 0
+    const moves = slot.moves || 0
+    if (hasStudents) {
+      if (now >= moveDeadline(oldStart)) {
+        return fail(409, 'A start time with students can be moved until ' + hoursText(MOVE_HOURS_BEFORE) + ' before it begins. You can still cancel it.')
+      }
+      if (newStart <= earliestNewTime(now)) {
+        return fail(409, 'Pick a new time more than ' + hoursText(NEW_TIME_HOURS_AHEAD) + ' from now, so your students have time to see it.')
+      }
+      if (moves >= MAX_MOVES) return fail(409, 'You have already moved this start time ' + MAX_MOVES + ' times.')
+    }
+
+    // --- writes ---
+    // the same seats (and the same students) at the new time
+    const movedSlot = { ...slot, id: newId, date: newDate, time: newTime, moves: hasStudents ? moves + 1 : moves }
+    const newSlots = []
+    for (const other of slots) {
+      newSlots.push(other.id === slotId ? movedSlot : other)
+    }
+    newSlots.sort((a, b) => (a.id < b.id ? -1 : 1)) // soonest first
+    const nowText = now.toISOString()
+    t.update(offerRef, { slots: newSlots, updatedAt: nowText })
+
+    for (const booking of students) {
+      t.update(db.collection('bookings').doc(booking.id), {
+        slotId: newId,
+        slotDate: newDate,
+        slotTime: newTime,
+        startsAt: newStart.toISOString(),
+        finishAfter: new Date(newStart.getTime() + lengthOf(booking)).toISOString(),
+        teacherMoved: true, // the student may now cancel for a full refund until the new start
+        learnerNotice: 'teacherMoved', // the student is told on Home and My Classes until they dismiss it
+        learnerNoticeSeen: false,
+        learnerNoticeFrom: booking.startsAt,
+        learnerNoticeTo: newStart.toISOString(),
+        learnerNoticeNote: note,
+        learnerNoticeAt: nowText,
+        teacherNoticeSeen: true, // the teacher acted on this time, so their own notice is old news
+        updatedAt: nowText,
+      })
+    }
+
+    return { offer: { id: offerId, ...offer, slots: newSlots, updatedAt: nowText }, students: students.length }
+  })
+}
+
+// reason may be '' only when nobody has booked the start time (the route trims it)
+export async function cancelStartTime(uid, offerId, slotId, reason) {
+  const offerRef = db.collection('offers').doc(offerId)
+
+  return db.runTransaction(async (t) => {
+    // --- reads ---
+    const offerSnap = await t.get(offerRef)
+    if (!offerSnap.exists) return fail(404, 'Course not found.')
+    const offer = offerSnap.data()
+    if (offer.teacherUid !== uid) return fail(403, 'This is not your course.')
+
+    const slots = offer.slots || []
+    const slot = findSlot(slots, slotId)
+    if (slot === null) return fail(404, 'That start time no longer exists.')
+    const students = await bookingsOfSlot(t, offerId, slotId)
+
+    const now = new Date()
+    if (slotMoment(slot.date, slot.time) <= now) {
+      return fail(409, 'This start time has already begun, so it can no longer be cancelled. You can still remove a student (Kick).')
+    }
+    if (students.length > 0 && reason === '') return fail(400, 'Please give a reason. Your students will see it.')
+
+    // every student is refunded, so read their accounts now (all reads come before the writes)
+    const refunds = {} // uid -> credits to give back
+    for (const booking of students) {
+      refunds[booking.learnerUid] = (refunds[booking.learnerUid] || 0) + booking.creditCost
+    }
+    const balances = {} // uid -> credits now
+    for (const learnerUid of Object.keys(refunds)) {
+      const snap = await t.get(db.collection('users').doc(learnerUid))
+      // without the account there is nowhere to put the refund, so do not cancel and lose the credit
+      if (!snap.exists) return fail(409, "A student's account could not be found, so their credits cannot be refunded.")
+      balances[learnerUid] = snap.data().credits || 0
+    }
+
+    // --- writes ---
+    const nowText = now.toISOString()
+    for (const booking of students) {
+      t.update(db.collection('bookings').doc(booking.id), {
+        status: 'cancelled',
+        cancelledAt: nowText,
+        cancelledBy: 'teacher',
+        startTimeCancelled: true, // the whole start time was cancelled (a Kick removes one student)
+        removalReason: reason,
+        refunded: true,
+        learnerNotice: 'teacherCancelled', // the student is told on Home and My Classes
+        learnerNoticeSeen: false,
+        learnerNoticeNote: reason,
+        learnerNoticeAt: nowText,
+        teacherNoticeSeen: true, // the teacher acted on this time, so their own notice is old news
+        updatedAt: nowText,
+      })
+    }
+    for (const learnerUid of Object.keys(refunds)) {
+      t.update(db.collection('users').doc(learnerUid), { credits: balances[learnerUid] + refunds[learnerUid] })
+    }
+
+    // the start time is gone
+    const newSlots = []
+    for (const other of slots) {
+      if (other.id !== slotId) newSlots.push(other)
+    }
+    t.update(offerRef, { slots: newSlots, updatedAt: nowText })
+
+    return { offer: { id: offerId, ...offer, slots: newSlots, updatedAt: nowText }, students: students.length }
+  })
+}
+
+// ---------- "Got it" on a notice (Home and My Classes) ----------
+// The teacher's notices: a student cancelled or moved. The student's: the teacher moved or
+// cancelled the start time. Each person only dismisses their own side.
+export async function dismissNotice(uid, bookingId) {
+  const bookingRef = db.collection('bookings').doc(bookingId)
+  const snapshot = await bookingRef.get()
+  if (!snapshot.exists) return fail(404, 'Booking not found.')
+  const booking = snapshot.data()
+  const role = roleOf(booking, uid)
+  if (role === '') return fail(403, 'This is not your booking.')
+
+  const changes = role === 'teacher'
+    ? { teacherNoticeSeen: true, teacherNoticeSeenAt: new Date().toISOString() }
+    : { learnerNoticeSeen: true }
+  await bookingRef.update(changes)
+  return { booking: { id: bookingId, ...booking, ...changes } }
+}
+
 // ---------- The teacher has seen this booking (the red numbers on Home, My Classes, the nav bar) ----------
 // Called when the teacher opens the Students list of a course (a student who just joined is no
-// longer new) and when they press "Got it" on the notice that a student cancelled.
+// longer new). "Got it" on a notice now uses dismissNotice above.
 export async function markSeenByTeacher(uid, bookingId) {
   const bookingRef = db.collection('bookings').doc(bookingId)
   const snapshot = await bookingRef.get()
@@ -437,6 +740,7 @@ export async function removeStudent(uid, bookingId, reason) {
       cancelledAt: now,
       cancelledBy: 'teacher',
       removalReason: reason,
+      teacherNoticeSeen: true, // a notice about this student (e.g. "moved") is old news now
       updatedAt: now,
     }
     t.update(bookingRef, changes)

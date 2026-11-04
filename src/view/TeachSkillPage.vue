@@ -758,14 +758,14 @@ async function remove() {
               v-if="isEdit"
               type="button"
               class="btn btn-outline-danger ms-auto"
-              :disabled="saving"
+              :disabled="saving || locked"
               @click="remove"
             >
               Delete course
             </button>
           </div>
           <p v-if="isEdit" class="text-muted small mt-2">
-            A course that students have booked cannot be deleted.
+            A course can't be deleted while students have an open booking. Once every booking is finished or cancelled, you can delete it.
           </p>
         </form>
       </template>

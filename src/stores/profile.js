@@ -1,7 +1,8 @@
 import { ref, computed } from 'vue'
 import { defineStore } from 'pinia'
 import {
-  createProfile, getMe, updateProfile, getMySkillCards, getOptions, getMyOffers, getMyGoals, addSlot, errorText,
+  createProfile, getMe, updateProfile, getMySkillCards, getOptions, getMyOffers, getMyGoals, addSlot, moveSlot,
+  cancelSlot, errorText,
 } from '../services/api'
 
 export const useProfileStore = defineStore('profile', () => {
@@ -117,6 +118,28 @@ export const useProfileStore = defineStore('profile', () => {
     }
   }
 
+  // Move or cancel a whole start time of one of my courses (everyone booked at it is affected).
+  // Returns '' if it worked, or the reason it did not.
+  async function moveCourseSlot(offerId, slotId, date, time, note) {
+    try {
+      const data = await moveSlot(offerId, slotId, date, time, note)
+      myOffers.value = myOffers.value.map((o) => (o.id === data.offer.id ? data.offer : o))
+      return ''
+    } catch (err) {
+      return errorText(err)
+    }
+  }
+
+  async function cancelCourseSlot(offerId, slotId, reason) {
+    try {
+      const data = await cancelSlot(offerId, slotId, reason)
+      myOffers.value = myOffers.value.map((o) => (o.id === data.offer.id ? data.offer : o))
+      return ''
+    } catch (err) {
+      return errorText(err)
+    }
+  }
+
   // forget everything, e.g. when someone logs out
   function reset() {
     generation++
@@ -133,6 +156,7 @@ export const useProfileStore = defineStore('profile', () => {
   return {
     profile, categories, regions, knownSkills, skillCards, myOffers, myGoals, coursesLoaded, loading, saving, error, saveError,
     credits,
-    fetchProfile, fetchOptions, fetchSkillCards, fetchMyCourses, saveProfile, addCourseSlot, reset,
+    fetchProfile, fetchOptions, fetchSkillCards, fetchMyCourses, saveProfile, addCourseSlot, moveCourseSlot,
+    cancelCourseSlot, reset,
   }
 })

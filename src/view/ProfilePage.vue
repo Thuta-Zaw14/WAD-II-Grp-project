@@ -1,8 +1,9 @@
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { auth } from '../firebase'
 import { useProfileStore } from '../stores/profile'
+import { useToastStore } from '../stores/toast'
 import SkillCard from '../components/SkillCard.vue'
 import NavBar from '../components/NavBar.vue'
 import LoadingText from '../components/LoadingText.vue'
@@ -57,6 +58,24 @@ const skillFields = [
   { field: 'skillsTeach', eyebrow: 'SHARE YOUR KNOWLEDGE', label: 'Skills I Can Teach' },
   { field: 'skillsLearn', eyebrow: 'KEEP GROWING', label: 'Skills I Want to Learn' },
 ]
+
+// ---------- Removing a skill ----------
+// The server refuses if one of my courses (teach) or learning goals (learn) still uses
+// the skill, and its message is shown in that card.
+const toast = useToastStore()
+const removeErrors = reactive({ skillsTeach: '', skillsLearn: '' })
+
+async function removeSkill(item, skill) {
+  if (!confirm('Remove "' + skill.name + '" from ' + item.label + '?')) return
+  removeErrors[item.field] = ''
+  const rest = skillsOf(item.field).filter((s) => s.name !== skill.name)
+  const saved = await store.saveProfile({ [item.field]: rest })
+  if (saved) {
+    toast.show('"' + skill.name + '" removed.')
+  } else {
+    removeErrors[item.field] = store.saveError
+  }
+}
 </script>
 
 <template>
@@ -147,19 +166,33 @@ const skillFields = [
                     <strong>{{ skill.name }}</strong>
                     <small class="text-muted d-block">{{ skill.category }}</small>
                   </div>
-                  <button
-                    type="button"
-                    class="btn btn-sm btn-outline-secondary"
-                    @click="router.push({
-                      path: item.field === 'skillsTeach' ? '/skills/teach' : '/skills/learn',
-                      query: { edit: skill.name },
-                    })"
-                  >
-                    Edit
-                  </button>
+                  <div class="d-flex gap-2">
+                    <button
+                      type="button"
+                      class="btn btn-sm btn-outline-secondary"
+                      @click="router.push({
+                        path: item.field === 'skillsTeach' ? '/skills/teach' : '/skills/learn',
+                        query: { edit: skill.name },
+                      })"
+                    >
+                      Edit
+                    </button>
+                    <button
+                      type="button"
+                      class="btn btn-sm btn-outline-danger"
+                      :disabled="store.saving"
+                      :aria-label="'Remove ' + skill.name"
+                      @click="removeSkill(item, skill)"
+                    >
+                      Remove
+                    </button>
+                  </div>
                 </div>
               </div>
               <p v-else class="text-muted small mb-0">No skills yet.</p>
+              <div v-if="removeErrors[item.field]" class="alert alert-danger small mt-3 mb-0" role="alert">
+                {{ removeErrors[item.field] }}
+              </div>
             </section>
           </div>
         </div>

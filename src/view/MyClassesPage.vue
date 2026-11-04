@@ -135,7 +135,8 @@ function creditNote(b) {
     return b.role === 'learner' ? cost + ' refunded after an admin looked at your report.' : 'An admin refunded the student after a report. No credits.'
   }
   if (b.removedByTeacher) {
-    return b.role === 'learner' ? cost + ' refunded.' : 'You removed this student. They were refunded.'
+    if (b.role === 'learner') return cost + ' refunded.'
+    return b.startTimeCancelled ? 'You cancelled this start time. The student was refunded.' : 'You removed this student. They were refunded.'
   }
   if (b.role === 'learner') {
     if (b.status === 'finished') return cost + ' paid to ' + b.teacherName + '.'
@@ -205,12 +206,15 @@ function upcomingSlots(offer) {
 // "×" takes them all off. Each card is { type, bookingId or offerId }.
 //   details     - a class I attend: description, stages, buttons
 //   cancel      - "Cancel this class?" (a class I attend)
+//   move        - move a class I attend to another start time of the same course
 //   reflection  - write the reflection for my current stage
 //   students    - the students in a class I host
 //   student     - one student's progress (view and approve reflections)
 //   kick        - why I am removing the student
 //   confirmKick - "Are you sure?"
-//   slot        - add a new start time to a class I host
+//   slot        - the start times of a class I host: move or cancel one, or add a new one
+//   moveSlot    - move one start time (everyone booked at it moves too)
+//   cancelSlot  - cancel one start time (everyone booked at it is refunded)
 const stack = ref([])
 const top = computed(() => stack.value[stack.value.length - 1] || null)
 const formError = ref('') // a problem with what was typed in the open popup
@@ -284,8 +288,8 @@ function showExtraStep(step) {
   store.actionError = ''
 }
 
-// Cancelling a class I attend has its own "Are you sure?" popup. More than 24 hours before
-// the start the credits come back; later than that they go to the teacher (models/bookings.js).
+// Cancelling a class I attend has its own "Are you sure?" popup. The credits always come back;
+// the server says until when that is allowed (cancelBefore, see models/bookings.js).
 function openCancel(b) {
   open({ type: 'cancel', bookingId: b.id })
 }
@@ -298,10 +302,42 @@ async function doReport(b) {
   if (await store.report(b.id, reportReason.value.trim())) extraStep.value = ''
 }
 
-// PLACEHOLDER: Reschedule (both sides) and the teacher's Cancel are not built yet, so these
-// buttons only say so for now. Replace with the real pages when they exist.
-function comingSoon(what) {
-  toast.show(what + ' is coming soon.')
+// ---------- Moving a class I attend to another start time ----------
+// The choices: the course's other start times with a free seat, more than 24 hours away (the
+// server checks all of this again, with its own clock).
+const DAY_MS = 24 * 60 * 60 * 1000
+const moveSlotId = ref('')
+
+async function openMove(b) {
+  moveSlotId.value = ''
+  open({ type: 'move', bookingId: b.id })
+  await offersStore.fetchOffers() // fresh seat counts
+}
+
+const moveChoices = computed(() => {
+  const b = topBooking.value
+  if (!b) return []
+  const offer = offersStore.offers.find((o) => o.id === b.offerId)
+  if (!offer) return []
+  const earliest = Date.now() + DAY_MS
+  return (offer.slots || []).filter(
+    (slot) => slot.id !== b.slotId && slot.spotsLeft > 0 && slot.startsAt && new Date(slot.startsAt).getTime() > earliest
+  )
+})
+
+// moving within the last 24 hours before the start means it can't be cancelled afterwards
+const moveIsLate = computed(() => {
+  const b = topBooking.value
+  return b !== null && !b.movedLate && new Date(b.startsAt).getTime() - Date.now() < DAY_MS
+})
+
+async function doMove() {
+  if (moveSlotId.value === '') {
+    formError.value = 'Pick a new start time.'
+    return
+  }
+  formError.value = ''
+  if (await store.move(topBooking.value.id, moveSlotId.value)) closeAll()
 }
 
 async function doConfirm(b) {
@@ -420,6 +456,89 @@ async function addSlot() {
     return
   }
   toast.show('New start time added.')
+  newSlot.value = { date: '', time: '' }
+}
+
+// ---------- Moving or cancelling one start time of a class I host ----------
+// A start time can hold several students, so these act on all of them. With nobody booked the
+// time is simply changed or removed. With students the server's rules apply (models/bookings.js):
+// a move until 2 hours before, to a time more than 24 hours away, at most twice; a cancel needs
+// a reason and refunds everyone.
+const slotForm = ref({ date: '', time: '', text: '' }) // text = the note (move) or the reason (cancel)
+
+// the start time the top popup is about
+const topSlot = computed(() => {
+  if (!topOffer.value || !top.value.slotId) return null
+  return (topOffer.value.slots || []).find((slot) => slot.id === top.value.slotId) || null
+})
+
+function slotLabel(slot) {
+  return slot.startsAt ? formatTime(slot.startsAt) : slot.date + ' ' + slot.time
+}
+
+function studentsText(count) {
+  return count + ' student' + (count === 1 ? '' : 's')
+}
+
+// why a start time with students can't be moved any more ('' if it can)
+function slotMoveProblem(slot) {
+  if (!slot || slot.taken === 0) return ''
+  if (slot.movesLeft === 0) return 'This start time has already been moved 2 times, so it can\'t be moved again. You can still cancel it.'
+  if (slot.moveBefore && Date.now() >= new Date(slot.moveBefore).getTime()) {
+    return 'It starts in less than 2 hours, so it can no longer be moved. You can still cancel it.'
+  }
+  return ''
+}
+
+function openMoveSlot(offer, slot) {
+  slotForm.value = { date: '', time: '', text: '' }
+  open({ type: 'moveSlot', offerId: offer.id, slotId: slot.id })
+}
+
+function openCancelSlot(offer, slot) {
+  slotForm.value = { date: '', time: '', text: '' }
+  open({ type: 'cancelSlot', offerId: offer.id, slotId: slot.id })
+}
+
+async function doMoveSlot() {
+  const slot = topSlot.value
+  if (slotForm.value.date === '' || slotForm.value.time === '') {
+    formError.value = 'Pick the new date and time.'
+    return
+  }
+  formError.value = ''
+  savingSlot.value = true
+  const students = slot.taken
+  const problem = await profileStore.moveCourseSlot(
+    top.value.offerId, slot.id, slotForm.value.date, slotForm.value.time, slotForm.value.text.trim()
+  )
+  savingSlot.value = false
+  if (problem !== '') {
+    formError.value = problem
+    return
+  }
+  toast.show(students > 0 ? 'Start time moved. ' + studentsText(students) + ' will see a notice.' : 'Start time moved.')
+  store.fetchBookings() // my students' bookings have the new time
+  back()
+}
+
+async function doCancelSlot() {
+  const slot = topSlot.value
+  if (slot.taken > 0 && slotForm.value.text.trim() === '') {
+    formError.value = 'Please give a reason. Your students will see it.'
+    return
+  }
+  formError.value = ''
+  savingSlot.value = true
+  const students = slot.taken
+  const problem = await profileStore.cancelCourseSlot(top.value.offerId, slot.id, slotForm.value.text.trim())
+  savingSlot.value = false
+  if (problem !== '') {
+    formError.value = problem
+    return
+  }
+  toast.show(students > 0 ? 'Start time cancelled. ' + studentsText(students) + ' refunded.' : 'Start time removed.')
+  store.fetchBookings()
   back()
 }
 </script>
@@ -444,7 +563,7 @@ async function addSlot() {
     <LoadingText v-else-if="store.loading && store.bookings.length === 0" text="Loading your classes..." />
     <p v-if="profileStore.error" class="alert alert-danger" role="alert">{{ profileStore.error }}</p>
 
-    <!-- students who cancelled one of my classes, and where the credits went -->
+    <!-- classes that were cancelled or moved (by a student, or by the teacher) -->
     <CancelNotices />
 
     <div class="row g-4">
@@ -486,7 +605,10 @@ async function addSlot() {
             </div>
 
             <template v-if="isOpen('attending')">
-            <p v-if="b.removedByTeacher" class="small text-danger mb-2">
+            <p v-if="b.removedByTeacher && b.startTimeCancelled" class="small text-danger mb-2">
+              {{ b.teacherName }} cancelled this start time: {{ b.removalReason }}
+            </p>
+            <p v-else-if="b.removedByTeacher" class="small text-danger mb-2">
               {{ b.teacherName }} removed you from this class: {{ b.removalReason }}
             </p>
             <div v-else-if="b.totalStageCount > 0 && b.status === 'booked'" class="mb-2">
@@ -590,7 +712,7 @@ async function addSlot() {
                   {{ courseActionCount(offer.id) }}<span class="visually-hidden"> things waiting for you: reflections, messages or new students</span>
                 </span>
               </button>
-              <button type="button" class="btn btn-sm btn-brand" @click="openSlot(offer)">Add time slot</button>
+              <button type="button" class="btn btn-sm btn-brand" @click="openSlot(offer)">Start times</button>
               <button type="button" class="btn btn-sm btn-outline-secondary" @click="router.push('/teach/' + offer.id)">Edit course</button>
             </div>
             </template>
@@ -643,12 +765,25 @@ async function addSlot() {
     </template>
 
     <!-- what happens next -->
-    <p v-if="topBooking.phase === 'upcoming' && topBooking.canCancel && topBooking.cancelRefunds" class="small text-muted mb-2">
-      Free cancellation until {{ formatTime(topBooking.cancelBefore) }}. After that you can still cancel, but your credits go to {{ topBooking.teacherName }}.
-    </p>
-    <p v-else-if="topBooking.phase === 'upcoming' && topBooking.canCancel" class="small text-muted mb-2">
-      It starts in less than 24 hours: you can still cancel, but your credits go to {{ topBooking.teacherName }}.
-    </p>
+    <template v-if="topBooking.phase === 'upcoming'">
+      <p v-if="topBooking.canCancel && topBooking.teacherMoved" class="small text-muted mb-2">
+        {{ topBooking.teacherName }} moved this class. If the new time doesn't suit you, you can cancel for a full refund until it starts.
+      </p>
+      <p v-else-if="topBooking.canCancel" class="small text-muted mb-2">
+        Free cancellation until {{ formatTime(topBooking.cancelBefore) }}.
+      </p>
+      <p v-else-if="topBooking.movedLate" class="small text-muted mb-2">
+        You moved this class less than 24 hours before it started, so it can no longer be cancelled.
+        If you can't come, message {{ topBooking.teacherName }}: they can remove you with a full refund.
+      </p>
+      <p v-else class="small text-muted mb-2">
+        Free cancellation has ended. If you can't come, message {{ topBooking.teacherName }}: they can remove you with a full refund.
+      </p>
+      <p v-if="topBooking.canMove" class="small text-muted mb-2">
+        You can move it to another start time until {{ formatTime(topBooking.moveBefore) }}
+        ({{ topBooking.movesLeft }} move{{ topBooking.movesLeft === 1 ? '' : 's' }} left).
+      </p>
+    </template>
     <p v-else-if="topBooking.phase === 'inProgress'" class="small text-muted mb-2">
       You can mark it finished from {{ formatTime(topBooking.finishAfter) }}.
     </p>
@@ -670,8 +805,8 @@ async function addSlot() {
     </div>
     <div v-if="store.actionError" class="alert alert-danger small mt-2 mb-0" role="alert">{{ store.actionError }}</div>
 
-    <template v-if="topBooking.canCancel || topBooking.canReport || topBooking.canConfirm" #footer>
-      <button v-if="topBooking.canCancel" type="button" class="btn btn-sm btn-outline-secondary" @click="comingSoon('Rescheduling')">Reschedule</button>
+    <template v-if="topBooking.canCancel || topBooking.canMove || topBooking.canReport || topBooking.canConfirm" #footer>
+      <button v-if="topBooking.canMove" type="button" class="btn btn-sm btn-outline-secondary" @click="openMove(topBooking)">Move to another time</button>
       <button v-if="topBooking.canCancel" type="button" class="btn btn-sm btn-outline-danger" @click="openCancel(topBooking)">Cancel booking</button>
       <button v-if="topBooking.canReport" type="button" class="btn btn-sm btn-outline-secondary" @click="showExtraStep('report')">Report a problem</button>
       <button v-if="topBooking.canConfirm" type="button" class="btn btn-sm btn-brand" :disabled="store.busyId === topBooking.id" @click="doConfirm(topBooking)">
@@ -689,25 +824,62 @@ async function addSlot() {
     @back="back"
     @close="closeAll"
   >
-    <template v-if="topBooking.cancelRefunds">
-      <p class="mb-2">
-        You'll get your <strong>{{ creditsText(topBooking.creditCost) }}</strong> back, and your seat goes to someone else.
-      </p>
-      <p class="small text-muted mb-0">Free cancellation is open until {{ formatTime(topBooking.cancelBefore) }}.</p>
-    </template>
-    <template v-else>
-      <p class="mb-2">
-        This class starts in less than 24 hours. If you cancel now, you <strong>won't get your
-        {{ creditsText(topBooking.creditCost) }} back</strong>: they go to {{ topBooking.teacherName }}, who kept this time for you.
-      </p>
-      <p class="small text-muted mb-0">Your seat will be freed for someone else.</p>
-    </template>
+    <p class="mb-2">
+      You'll get your <strong>{{ creditsText(topBooking.creditCost) }}</strong> back, and your seat goes to someone else.
+    </p>
+    <p class="small text-muted mb-0">Free cancellation is open until {{ formatTime(topBooking.cancelBefore) }}.</p>
     <div v-if="store.actionError" class="alert alert-danger small mt-2 mb-0" role="alert">{{ store.actionError }}</div>
 
     <template #footer>
       <button type="button" class="btn btn-sm btn-outline-secondary" @click="stack.length > 1 ? back() : closeAll()">Keep my booking</button>
       <button type="button" class="btn btn-sm btn-danger" :disabled="store.busyId === topBooking.id" @click="doCancel(topBooking)">
         {{ store.busyId === topBooking.id ? 'Cancelling...' : 'Yes, cancel' }}
+      </button>
+    </template>
+  </ClassModal>
+
+  <!-- Move a class I attend to another start time -->
+  <ClassModal
+    v-else-if="top && top.type === 'move' && topBooking"
+    title="Move to another time"
+    :subtitle="topBooking.title + ' · now ' + formatTime(topBooking.startsAt)"
+    :can-go-back="stack.length > 1"
+    @back="back"
+    @close="closeAll"
+  >
+    <p class="small text-muted">
+      Pick another start time of this course. It needs a free seat and must be more than 24 hours away.
+      You can move this class {{ topBooking.movesLeft }} more time{{ topBooking.movesLeft === 1 ? '' : 's' }}.
+      Your credits, chat and reflections stay with it.
+    </p>
+    <LoadingText v-if="offersStore.loading && moveChoices.length === 0" text="Loading start times..." />
+    <fieldset v-else-if="moveChoices.length > 0" class="mb-0">
+      <legend class="visually-hidden">New start time</legend>
+      <label v-for="slot in moveChoices" :key="slot.id" class="move-choice">
+        <input v-model="moveSlotId" type="radio" name="move-slot" :value="slot.id" class="form-check-input mt-0" />
+        <span>{{ formatTime(slot.startsAt) }}</span>
+        <small class="text-muted ms-auto">{{ slot.spotsLeft }} seat{{ slot.spotsLeft === 1 ? '' : 's' }} left</small>
+      </label>
+    </fieldset>
+    <p v-else class="mb-0">
+      There is no other start time with a free seat more than 24 hours away.
+      Ask {{ topBooking.teacherName }} in the chat to add one.
+    </p>
+    <p v-if="moveIsLate && moveChoices.length > 0" class="alert alert-warning small mt-3 mb-0" role="note">
+      Your class starts in less than 24 hours. After this move it can no longer be cancelled.
+    </p>
+    <p v-if="formError" class="small text-danger mt-2 mb-0" role="alert">{{ formError }}</p>
+    <div v-if="store.actionError" class="alert alert-danger small mt-2 mb-0" role="alert">{{ store.actionError }}</div>
+
+    <template #footer>
+      <button type="button" class="btn btn-sm btn-outline-secondary" @click="stack.length > 1 ? back() : closeAll()">Keep my time</button>
+      <button
+        type="button"
+        class="btn btn-sm btn-brand"
+        :disabled="store.busyId === topBooking.id || moveChoices.length === 0"
+        @click="doMove"
+      >
+        {{ store.busyId === topBooking.id ? 'Moving...' : 'Move my booking' }}
       </button>
     </template>
   </ClassModal>
@@ -835,8 +1007,6 @@ async function addSlot() {
       <button v-if="topBooking.canConfirm" type="button" class="btn btn-sm btn-outline-secondary" :disabled="store.busyId === topBooking.id" @click="doConfirm(topBooking)">
         Mark as finished
       </button>
-      <button v-if="topBooking.status === 'booked'" type="button" class="btn btn-sm btn-outline-secondary" @click="comingSoon('Rescheduling')">Reschedule</button>
-      <button v-if="topBooking.status === 'booked'" type="button" class="btn btn-sm btn-outline-danger" @click="comingSoon('Cancelling a session')">Cancel Session</button>
       <button v-if="topBooking.status === 'booked'" type="button" class="btn btn-sm btn-danger" @click="openKick(topBooking)">Kick</button>
     </template>
   </ClassModal>
@@ -880,15 +1050,32 @@ async function addSlot() {
     </template>
   </ClassModal>
 
-  <!-- New start time -->
+  <!-- Start times of a class I host: move or cancel one, or add a new one -->
   <ClassModal
     v-else-if="top && top.type === 'slot' && topOffer"
-    title="New time slot"
+    title="Start times"
     :subtitle="topOffer.title"
     :can-go-back="stack.length > 1"
     @back="back"
     @close="closeAll"
   >
+    <template v-if="upcomingSlots(topOffer).length > 0">
+      <div v-for="slot in upcomingSlots(topOffer)" :key="slot.id" class="slot-row">
+        <span class="min-w-0">
+          <strong class="d-block">{{ slotLabel(slot) }}</strong>
+          <small class="text-muted">
+            {{ slot.taken }}/{{ slot.capacity }} booked<template v-if="slot.moves > 0"> &middot; moved {{ slot.moves }} of 2 times</template>
+          </small>
+        </span>
+        <span class="d-flex gap-2 flex-shrink-0">
+          <button type="button" class="btn btn-sm btn-outline-secondary" :aria-label="'Move ' + slotLabel(slot)" @click="openMoveSlot(topOffer, slot)">Move</button>
+          <button type="button" class="btn btn-sm btn-outline-danger" :aria-label="'Cancel ' + slotLabel(slot)" @click="openCancelSlot(topOffer, slot)">Cancel</button>
+        </span>
+      </div>
+    </template>
+    <p v-else class="small text-muted">No upcoming start times yet.</p>
+
+    <h3 class="h6 mt-3">Add a start time</h3>
     <div class="row g-2">
       <div class="col-12 col-sm-6">
         <label for="slot-date" class="form-label">Date</label>
@@ -901,19 +1088,86 @@ async function addSlot() {
     </div>
     <p v-if="formError" class="small text-danger mt-2 mb-0" role="alert">{{ formError }}</p>
 
-    <template v-if="upcomingSlots(topOffer).length > 0">
-      <h3 class="h6 mt-3">Already planned</h3>
-      <ul class="small text-muted mb-0 ps-3">
-        <li v-for="slot in upcomingSlots(topOffer)" :key="slot.id">
-          {{ slot.date }} {{ slot.time }} &middot; {{ slot.taken }}/{{ slot.capacity }} booked
-        </li>
-      </ul>
+    <template #footer>
+      <button type="button" class="btn btn-outline-secondary" @click="closeAll">Close</button>
+      <button type="button" class="btn btn-brand" :disabled="savingSlot" @click="addSlot">
+        {{ savingSlot ? 'Adding...' : 'Add start time' }}
+      </button>
     </template>
+  </ClassModal>
+
+  <!-- Move one start time -->
+  <ClassModal
+    v-else-if="top && top.type === 'moveSlot' && topOffer && topSlot"
+    title="Move this start time"
+    :subtitle="topOffer.title + ' · ' + slotLabel(topSlot)"
+    :can-go-back="stack.length > 1"
+    @back="back"
+    @close="closeAll"
+  >
+    <template v-if="topSlot.taken > 0">
+      <p class="mb-2">
+        The {{ studentsText(topSlot.taken) }} booked at this time will move with it. They'll get a notice,
+        and can cancel for a full refund until the new start if it doesn't suit them.
+      </p>
+      <p class="small text-muted">
+        The new time must be more than 24 hours from now. A start time with students can be moved until
+        2 hours before it begins, at most 2 times<template v-if="topSlot.moves > 0"> (moved {{ topSlot.moves }} so far)</template>.
+      </p>
+    </template>
+    <p v-else class="small text-muted">Nobody has booked this time yet, so you can change it freely.</p>
+
+    <p v-if="slotMoveProblem(topSlot)" class="alert alert-warning small" role="note">{{ slotMoveProblem(topSlot) }}</p>
+    <template v-else>
+      <div class="row g-2">
+        <div class="col-12 col-sm-6">
+          <label for="move-date" class="form-label">New date</label>
+          <input id="move-date" v-model="slotForm.date" type="date" class="form-control" :min="todayText()" />
+        </div>
+        <div class="col-12 col-sm-6">
+          <label for="move-time" class="form-label">New time</label>
+          <input id="move-time" v-model="slotForm.time" type="time" class="form-control" />
+        </div>
+      </div>
+      <template v-if="topSlot.taken > 0">
+        <label for="move-note" class="form-label mt-3">Note to your students (optional)</label>
+        <textarea id="move-note" v-model="slotForm.text" class="form-control" rows="2" maxlength="300" placeholder="e.g. Sorry, I have a clash at work."></textarea>
+      </template>
+    </template>
+    <p v-if="formError" class="small text-danger mt-2 mb-0" role="alert">{{ formError }}</p>
 
     <template #footer>
-      <button type="button" class="btn btn-outline-secondary" @click="closeAll">Cancel</button>
-      <button type="button" class="btn btn-brand" :disabled="savingSlot" @click="addSlot">
-        {{ savingSlot ? 'Adding...' : 'Add time slot' }}
+      <button type="button" class="btn btn-outline-secondary" @click="back">Back</button>
+      <button type="button" class="btn btn-brand" :disabled="savingSlot || slotMoveProblem(topSlot) !== ''" @click="doMoveSlot">
+        {{ savingSlot ? 'Moving...' : 'Move start time' }}
+      </button>
+    </template>
+  </ClassModal>
+
+  <!-- Cancel one start time -->
+  <ClassModal
+    v-else-if="top && top.type === 'cancelSlot' && topOffer && topSlot"
+    title="Cancel this start time?"
+    :subtitle="topOffer.title + ' · ' + slotLabel(topSlot)"
+    :can-go-back="stack.length > 1"
+    @back="back"
+    @close="closeAll"
+  >
+    <template v-if="topSlot.taken > 0">
+      <p class="mb-2">
+        The {{ studentsText(topSlot.taken) }} booked at this time will get a <strong>full refund</strong> and a notice
+        with your reason. This can't be undone.
+      </p>
+      <label for="cancel-reason" class="form-label">Reason (your students will see it)</label>
+      <textarea id="cancel-reason" v-model="slotForm.text" class="form-control" rows="3" maxlength="300"></textarea>
+    </template>
+    <p v-else class="mb-0">Nobody has booked this time, so it will simply be removed.</p>
+    <p v-if="formError" class="small text-danger mt-2 mb-0" role="alert">{{ formError }}</p>
+
+    <template #footer>
+      <button type="button" class="btn btn-outline-secondary" @click="back">Keep it</button>
+      <button type="button" class="btn btn-danger" :disabled="savingSlot" @click="doCancelSlot">
+        {{ savingSlot ? 'Cancelling...' : topSlot.taken > 0 ? 'Cancel and refund' : 'Remove start time' }}
       </button>
     </template>
   </ClassModal>
@@ -929,6 +1183,32 @@ async function addSlot() {
 .class-row:first-of-type {
   border-top: 0;
   padding-top: 0;
+}
+
+/* one start time in the "Start times" popup, and one choice in "Move to another time" */
+.slot-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 0;
+  border-top: 1px solid var(--k-border);
+}
+
+.slot-row:first-of-type {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.move-choice {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  margin-bottom: 8px;
+  border: 1px solid var(--k-border);
+  border-radius: 10px;
+  cursor: pointer;
 }
 
 .min-w-0 {

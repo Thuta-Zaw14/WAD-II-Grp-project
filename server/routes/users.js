@@ -113,6 +113,53 @@ function cleanSkills(list) {
   return result
 }
 
+// The skills in the saved list that are missing from the new list (capital letters ignored).
+// Renaming "Guitar" to "Acoustic guitar" counts as taking "Guitar" away.
+function removedSkillNames(savedList, newList) {
+  const kept = []
+  for (const skill of newList) kept.push(skill.name.toLowerCase())
+  const removed = []
+  for (const skill of savedList || []) {
+    if (typeof skill.name === 'string' && !kept.includes(skill.name.toLowerCase())) {
+      removed.push(skill.name)
+    }
+  }
+  return removed
+}
+
+// A skill can't be removed (or renamed) while something of mine still uses it: a teach
+// skill by one of my courses, a learn skill by one of my learning goals. Otherwise that
+// course or goal could not be saved again ("Pick one of the skills from your profile").
+// Returns { status, error }, or null if fine.
+async function findSkillInUse(uid, saved, changes) {
+  const checks = [
+    { field: 'skillsTeach', collection: 'offers', owner: 'teacherUid', thing: 'course' },
+    { field: 'skillsLearn', collection: 'learnGoals', owner: 'learnerUid', thing: 'learning goal' },
+  ]
+  for (const check of checks) {
+    if (changes[check.field] === undefined) continue
+    const removed = removedSkillNames(saved[check.field], changes[check.field])
+    if (removed.length === 0) continue
+
+    const result = await findDocsWhereEquals(check.collection, check.owner, uid)
+    if (!result.status) {
+      return { status: 500, error: 'Could not check your skills. Please try again.' }
+    }
+    for (const item of result.docs) {
+      for (const name of removed) {
+        if (typeof item.skill === 'string' && item.skill.toLowerCase() === name.toLowerCase()) {
+          return {
+            status: 409,
+            error: '"' + name + '" is used by your ' + check.thing + ' "' + item.title +
+              '", so it can\'t be removed or renamed. Delete that ' + check.thing + ' first.',
+          }
+        }
+      }
+    }
+  }
+  return null
+}
+
 // An invite link carries the uid of the person who sent it (see LoginPage.vue).
 // Returns that uid if it belongs to a real, different user, otherwise ''.
 // A bad or made-up code is simply ignored: the new person still gets their profile.
@@ -206,6 +253,10 @@ router.patch('/me', verifyToken, async (req, res) => {
   }
   if (changes.photo && changes.photo !== snapshot.data().photo) {
     return res.status(400).json({ error: 'Profile pictures can no longer be added.' })
+  }
+  const inUse = await findSkillInUse(req.user.uid, snapshot.data(), changes)
+  if (inUse) {
+    return res.status(inUse.status).json({ error: inUse.error })
   }
 
   await userRef.update(changes)

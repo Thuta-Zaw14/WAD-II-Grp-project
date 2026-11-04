@@ -5,7 +5,7 @@ import { addDoc, getAllDocs, findDocsWhereEquals } from '../models/dbQuery.js'
 import { findProfileSkill, findMediaProblem, cleanMedia, allMediaPaths, findTitleProblem } from '../models/skillRules.js'
 import { slotMoment } from '../models/bookingRules.js'
 import { publicOffer, publicBooking } from '../models/publicView.js'
-import { bookSlot, syncBookingsWithOffer } from '../models/bookings.js'
+import { bookSlot, syncBookingsWithOffer, moveStartTime, cancelStartTime } from '../models/bookings.js'
 import { deleteDiscussion, isValidId } from '../models/discussions.js'
 import { verifyPlace } from '../models/places.js'
 import { MAX_STAGES, calcCreditCost } from '../config/credits.js'
@@ -24,6 +24,7 @@ router.param('slotId', (req, res, next, value) => {
 })
 
 const maxSlots = 20
+const maxNoteLength = 300 // the teacher's note or reason when moving or cancelling a start time
 
 // ---------- Checking what the form sends ----------
 
@@ -145,12 +146,14 @@ function buildSlots(bodySlots, capacity, existing) {
     if (seen.includes(id)) continue // the same start time twice
     seen.push(id)
 
-    // keep the people who already booked this slot
+    // keep the people who already booked this slot, and how often the teacher has moved it
     let bookedBy = []
+    let moves = 0
     for (const old of oldSlots) {
       if (old.id === id && Array.isArray(old.bookedBy)) bookedBy = old.bookedBy
+      if (old.id === id && Number.isInteger(old.moves)) moves = old.moves
     }
-    slots.push({ id: id, date: slot.date, time: slot.time, capacity: capacity, bookedBy: bookedBy })
+    slots.push({ id: id, date: slot.date, time: slot.time, capacity: capacity, bookedBy: bookedBy, moves: moves })
   }
 
   // slots sorted soonest first
@@ -453,6 +456,51 @@ router.post('/:id/slots', verifyToken, async (req, res) => {
   res.status(201).json(publicOffer(outcome.offer, req.user.uid))
 })
 
+// The teacher moves a whole start time (everyone booked at it moves too).
+// body = { date: '2026-11-09', time: '10:00', note: 'optional, shown to the students' }
+// The rules are in models/bookings.js (moveStartTime).
+router.post('/:id/slots/:slotId/move', verifyToken, async (req, res) => {
+  const slot = { date: req.body.date, time: req.body.time }
+  if (!isRealSlot(slot)) {
+    return res.status(400).json({ error: 'Please pick a valid date and time.' })
+  }
+  const note = typeof req.body.note === 'string' ? req.body.note.trim() : ''
+  if (note.length > maxNoteLength) {
+    return res.status(400).json({ error: 'The note must be ' + maxNoteLength + ' characters or fewer.' })
+  }
+
+  try {
+    const result = await moveStartTime(req.user.uid, req.params.id, req.params.slotId, slot.date, slot.time, note)
+    if (result.error) {
+      return res.status(result.status).json({ error: result.error })
+    }
+    res.json({ offer: publicOffer(result.offer, req.user.uid), students: result.students })
+  } catch (err) {
+    console.log('moveStartTime failed:', err.message)
+    res.status(500).json({ error: 'Could not move the start time. Please try again.' })
+  }
+})
+
+// The teacher cancels a whole start time: every student booked at it is refunded in full.
+// body = { reason } (needed when students are booked; they see it)
+router.post('/:id/slots/:slotId/cancel', verifyToken, async (req, res) => {
+  const reason = typeof req.body.reason === 'string' ? req.body.reason.trim() : ''
+  if (reason.length > maxNoteLength) {
+    return res.status(400).json({ error: 'The reason must be ' + maxNoteLength + ' characters or fewer.' })
+  }
+
+  try {
+    const result = await cancelStartTime(req.user.uid, req.params.id, req.params.slotId, reason)
+    if (result.error) {
+      return res.status(result.status).json({ error: result.error })
+    }
+    res.json({ offer: publicOffer(result.offer, req.user.uid), students: result.students })
+  } catch (err) {
+    console.log('cancelStartTime failed:', err.message)
+    res.status(500).json({ error: 'Could not cancel the start time. Please try again.' })
+  }
+})
+
 router.put('/:id', verifyToken, async (req, res) => {
   const ref = db.collection('offers').doc(req.params.id)
   const snapshot = await ref.get()
@@ -552,11 +600,17 @@ router.delete('/:id', verifyToken, async (req, res) => {
     const offer = snapshot.data()
     if (offer.teacherUid !== req.user.uid) return { status: 403, error: 'This is not your course.' }
 
-    let students = 0
-    for (const slot of offer.slots || []) {
-      if (Array.isArray(slot.bookedBy)) students += slot.bookedBy.length
+    // Only open bookings (booked or disputed) stop the delete. A finished student's uid stays in
+    // slot.bookedBy for good, so counting bookedBy would stop the delete for ever. Finished and
+    // cancelled bookings keep their own copy of the title, so My Classes still shows them.
+    const bookingsSnap = await t.get(db.collection('bookings').where('offerId', '==', ref.id))
+    let open = 0
+    for (const doc of bookingsSnap.docs) {
+      if (isActive(doc.data())) open++
     }
-    if (students > 0) return { status: 409, error: "Can't delete this course: students have booked it." }
+    if (open > 0) {
+      return { status: 409, error: "Can't delete this course while students have an open booking. Once every booking is finished or cancelled, you can delete it." }
+    }
 
     t.delete(ref)
     return { offer: offer }

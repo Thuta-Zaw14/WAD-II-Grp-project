@@ -1,9 +1,11 @@
 <script setup>
 import { useBookingsStore } from '../stores/bookings'
 
-// Tells a teacher that a student cancelled one of their classes, and where the credits went:
-// back to the student (more than 24 hours before the start) or to the teacher (later than that).
-// Each notice stays until the teacher presses "Got it". Shown on Home and My Classes.
+// Tells people when a class was cancelled or moved, until they press "Got it". Shown on Home and
+// My Classes.
+//   As a teacher: a student cancelled (always refunded now; an older rule sometimes paid the
+//   teacher instead) or moved their booking to another start time.
+//   As a student: the teacher moved or cancelled the start time of a class I attend.
 const store = useBookingsStore()
 
 function creditsText(count) {
@@ -24,24 +26,51 @@ function formatTime(iso) {
 </script>
 
 <template>
-  <section v-if="store.cancelNotices.length > 0" class="mb-4" aria-label="Cancelled classes">
-    <div v-for="b in store.cancelNotices" :key="b.id" class="cancel-notice" role="status">
+  <section v-if="store.notices.length > 0" class="mb-4" aria-label="Changes to your classes">
+    <div v-for="b in store.notices" :key="b.id" class="cancel-notice" role="status">
       <div class="min-w-0">
-        <p class="fw-semibold mb-1">
-          {{ b.learnerName }} cancelled {{ b.title }}
-        </p>
-        <p class="small mb-0">
-          It was starting {{ formatTime(b.startsAt) }}.
-          <template v-if="b.refunded">
-            They cancelled more than 24 hours before the start, so
-            <strong>{{ b.learnerName }} was refunded the {{ creditsText(b.creditCost) }}</strong>.
-          </template>
-          <template v-else>
-            They cancelled less than 24 hours before the start, so
-            <strong>you received the {{ creditsText(b.creditCost) }}</strong>.
-          </template>
-          Their seat is free again.
-        </p>
+        <!-- the teacher's notices -->
+        <template v-if="b.notice.type === 'cancelled'">
+          <p class="fw-semibold mb-1">{{ b.learnerName }} cancelled {{ b.title }}</p>
+          <p class="small mb-0">
+            It was starting {{ formatTime(b.startsAt) }}.
+            <template v-if="b.refunded">
+              <strong>{{ b.learnerName }} was refunded the {{ creditsText(b.creditCost) }}</strong>.
+            </template>
+            <template v-else>
+              They cancelled less than 24 hours before the start, so
+              <strong>you received the {{ creditsText(b.creditCost) }}</strong>.
+            </template>
+            Their seat is free again.
+          </p>
+        </template>
+
+        <template v-else-if="b.notice.type === 'moved'">
+          <p class="fw-semibold mb-1">{{ b.learnerName }} moved {{ b.title }}</p>
+          <p class="small mb-0">
+            From {{ formatTime(b.notice.from) }} to <strong>{{ formatTime(b.notice.to) }}</strong>.
+          </p>
+        </template>
+
+        <!-- the student's notices -->
+        <template v-else-if="b.notice.type === 'teacherMoved'">
+          <p class="fw-semibold mb-1">{{ b.teacherName }} moved {{ b.title }}</p>
+          <p class="small mb-1">
+            It now starts <strong>{{ formatTime(b.notice.to) }}</strong> (it was {{ formatTime(b.notice.from) }}).
+          </p>
+          <p v-if="b.notice.note" class="small mb-1">{{ b.teacherName }} says: {{ b.notice.note }}</p>
+          <p v-if="b.canCancel" class="small mb-0">
+            If the new time doesn't suit you, you can cancel for a full refund until it starts (Details on My Classes).
+          </p>
+        </template>
+
+        <template v-else-if="b.notice.type === 'teacherCancelled'">
+          <p class="fw-semibold mb-1">{{ b.teacherName }} cancelled {{ b.title }}</p>
+          <p class="small mb-1">
+            It was starting {{ formatTime(b.startsAt) }}. <strong>You got your {{ creditsText(b.creditCost) }} back</strong>.
+          </p>
+          <p v-if="b.notice.note" class="small mb-0">Reason: {{ b.notice.note }}</p>
+        </template>
       </div>
       <button type="button" class="btn btn-sm btn-outline-secondary flex-shrink-0" @click="store.dismissNotice(b.id)">
         Got it

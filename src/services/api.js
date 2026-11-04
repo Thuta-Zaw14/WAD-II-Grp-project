@@ -100,6 +100,20 @@ export async function addSlot(offerId, date, time) {
   return response.data
 }
 
+// the teacher moves a whole start time (everyone booked at it moves too) -> { offer, students }
+export async function moveSlot(offerId, slotId, date, time, note) {
+  const url = API + '/offers/' + encodeURIComponent(offerId) + '/slots/' + encodeURIComponent(slotId) + '/move'
+  const response = await axios.post(url, { date: date, time: time, note: note }, await authConfig())
+  return response.data
+}
+
+// the teacher cancels a whole start time (everyone booked at it is refunded) -> { offer, students }
+export async function cancelSlot(offerId, slotId, reason) {
+  const url = API + '/offers/' + encodeURIComponent(offerId) + '/slots/' + encodeURIComponent(slotId) + '/cancel'
+  const response = await axios.post(url, { reason: reason }, await authConfig())
+  return response.data
+}
+
 // -> { offer, removedPaths }
 export async function updateOffer(id, offer) {
   const response = await axios.put(API + '/offers/' + encodeURIComponent(id), offer, await authConfig())
@@ -178,6 +192,18 @@ export async function approveBookingStage(id, stageIndex) {
 // -> { booking, offer }
 export async function cancelBooking(id) {
   const response = await axios.post(API + '/bookings/' + encodeURIComponent(id) + '/cancel', {}, await authConfig())
+  return response.data
+}
+
+// the student moves their booking to another start time of the same course -> { booking, offer }
+export async function moveBooking(id, slotId) {
+  const response = await axios.post(API + '/bookings/' + encodeURIComponent(id) + '/move', { slotId: slotId }, await authConfig())
+  return response.data
+}
+
+// "Got it" on a notice: a class was cancelled or moved -> { booking }
+export async function dismissBookingNotice(id) {
+  const response = await axios.post(API + '/bookings/' + encodeURIComponent(id) + '/notice-seen', {}, await authConfig())
   return response.data
 }
 

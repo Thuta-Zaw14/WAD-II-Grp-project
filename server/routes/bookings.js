@@ -3,7 +3,7 @@ import { verifyToken } from '../middleware/verifyToken.js'
 import { findDocsWhereEquals } from '../models/dbQuery.js'
 import {
   cancelBooking, confirmBooking, reportBooking, removeStudent, markSeenByTeacher, markSeenByLearner,
-  submitStageReflection, approveBookingStage,
+  submitStageReflection, approveBookingStage, moveBooking, dismissNotice,
 } from '../models/bookings.js'
 import { publicBooking, publicOffer, publicMessage, publicChatInfo } from '../models/publicView.js'
 import { sendMessage, readMessages, chatIsOpen, MAX_MESSAGE_LENGTH } from '../models/chat.js'
@@ -85,7 +85,41 @@ router.post('/:id/progress/stages/:stageIndex/approve', verifyToken, async (req,
   }
 })
 
-// The student cancels (refunded if it is more than 24 hours before the start)
+// The student moves their booking to another start time of the same course. body = { slotId }
+router.post('/:id/move', verifyToken, async (req, res) => {
+  if (typeof req.body.slotId !== 'string' || req.body.slotId === '') {
+    return res.status(400).json({ error: 'Pick a start time.' })
+  }
+  try {
+    const result = await moveBooking(req.user.uid, req.params.id, req.body.slotId)
+    if (result.error) {
+      return res.status(result.status).json({ error: result.error })
+    }
+    res.json({
+      booking: publicBooking(result.booking, req.user.uid),
+      offer: publicOffer(result.offer, req.user.uid),
+    })
+  } catch (err) {
+    console.log('moveBooking failed:', err.message)
+    res.status(500).json({ error: 'Could not move the booking. Please try again.' })
+  }
+})
+
+// "Got it" on a notice (a student cancelled or moved; the teacher moved or cancelled the start time)
+router.post('/:id/notice-seen', verifyToken, async (req, res) => {
+  try {
+    const result = await dismissNotice(req.user.uid, req.params.id)
+    if (result.error) {
+      return res.status(result.status).json({ error: result.error })
+    }
+    res.json({ booking: publicBooking(result.booking, req.user.uid) })
+  } catch (err) {
+    console.log('dismissNotice failed:', err.message)
+    res.status(500).json({ error: 'Could not update the booking. Please try again.' })
+  }
+})
+
+// The student cancels, for a full refund (until 24 hours before the start; see models/bookings.js)
 router.post('/:id/cancel', verifyToken, async (req, res) => {
   try {
     const result = await cancelBooking(req.user.uid, req.params.id)

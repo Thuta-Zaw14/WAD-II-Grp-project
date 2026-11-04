@@ -41,10 +41,9 @@ function handleAuthChange(firebaseUser) {
     user.value = firebaseUser
     profileStore.fetchProfile()
 
-    // only fetch if the store does not have the offers yet
-    if (offersStore.offers.length === 0) {
-      offersStore.fetchOffers()
-    }
+    // fetch every time the page opens, so new courses, seat counts and start times that have
+    // passed are up to date (the old list stays on screen until the new one arrives)
+    offersStore.fetchOffers()
   } else {
     profileStore.reset()
     offersStore.reset() // each offer says which slots are "mine", so the next person must not see these
@@ -142,7 +141,8 @@ function clearLocation() {
 }
 
 // ---------- The list (also used for the map pins) ----------
-const filteredSkills = computed(() => {
+// Courses that match the search, genre and region (with their distance when we know where you are)
+const matchingSkills = computed(() => {
   const results = []
 
   for (const item of skills.value) {
@@ -170,6 +170,25 @@ const filteredSkills = computed(() => {
 
   return results
 })
+
+// Courses with no open start time (every time has passed or is full) are hidden, so the list only
+// shows what can be booked. A course I have booked always stays, so I can still find my booking.
+const showUnavailable = ref(false)
+
+function hasOpenSlot(item) {
+  for (const slot of item.slots) {
+    if (!slot.past && !slot.booked) return true
+  }
+  return false
+}
+
+const filteredSkills = computed(() => {
+  if (showUnavailable.value) return matchingSkills.value
+  return matchingSkills.value.filter((item) => hasOpenSlot(item) || hasBooked(item))
+})
+
+// how many matching courses are hidden right now
+const hiddenCount = computed(() => matchingSkills.value.length - filteredSkills.value.length)
 
 // ---------- The map ----------
 const mapEl = ref(null)
@@ -475,6 +494,19 @@ function resetFilters() {
         >{{ r }}</button>
       </div>
 
+      <div class="d-flex align-items-center flex-wrap gap-2 mb-2">
+        <span class="small text-muted filter-label">Show</span>
+        <button
+          type="button"
+          class="filter"
+          :class="{ active: showUnavailable }"
+          :aria-pressed="showUnavailable"
+          @click="showUnavailable = !showUnavailable"
+        >
+          Past or full courses<span v-if="hiddenCount > 0 && !showUnavailable"> ({{ hiddenCount }} hidden)</span>
+        </button>
+      </div>
+
       <!-- Sort by distance: a pill like the filters above; dark brown while it is on -->
       <div class="d-flex align-items-center flex-wrap gap-2">
         <span class="small text-muted filter-label">Sort</span>
@@ -558,7 +590,7 @@ function resetFilters() {
             </div>
           </div>
 
-          <LoadingText v-if="offersStore.loading" text="Loading skills..." />
+          <LoadingText v-if="offersStore.loading && skills.length === 0" text="Loading skills..." />
           <p v-else-if="offersStore.error" class="text-danger">{{ offersStore.error }}</p>
           <EmptyState
             v-else-if="skills.length === 0"
@@ -567,6 +599,14 @@ function resetFilters() {
             text="Be the first to teach something and earn credits."
           >
             <button class="btn btn-brand btn-sm" @click="router.push('/teach/new')">Teach a skill</button>
+          </EmptyState>
+          <EmptyState
+            v-else-if="filteredSkills.length === 0 && hiddenCount > 0"
+            icon="🕓"
+            title="No open courses right now"
+            text="Every matching course has already started or is full."
+          >
+            <button class="btn btn-outline-secondary btn-sm" @click="showUnavailable = true">Show them anyway</button>
           </EmptyState>
           <EmptyState
             v-else-if="filteredSkills.length === 0"
@@ -701,7 +741,7 @@ function resetFilters() {
           <div v-if="bookedMessage">
             <div class="alert alert-success">{{ bookedMessage }}</div>
             <p class="small text-muted">
-              You will find it under My classes, where you can cancel it while that is still allowed.
+              You will find it under My classes, where you can move or cancel it while that is still allowed.
             </p>
             <button class="btn btn-brand me-2" @click="goToSessions">Go to My classes</button>
             <button class="btn btn-outline-secondary" @click="closeBooking">Close</button>
@@ -754,7 +794,7 @@ function resetFilters() {
                 You can cancel for a full refund until {{ formatTime(chosenSlot.cancelBefore) }}.
               </p>
               <p v-else class="small text-danger mb-2">
-                This starts in less than 24 hours, so if you cancel after booking your credits go to the teacher.
+                This starts in less than 24 hours, so it can't be cancelled once you book it.
               </p>
               <p v-if="credits < selectedSkill.creditCost" class="small text-danger mb-2">
                 You do not have enough credits. Teach a course to earn some.

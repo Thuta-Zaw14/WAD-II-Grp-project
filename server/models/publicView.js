@@ -1,7 +1,9 @@
 // What the browser is allowed to see.
 // The documents in Firestore hold things other people should not get (for example
 // the uids of everyone who booked a slot), so every route sends these cut-down copies.
-import { slotMoment, cancelDeadline, phaseOf, roleOf } from './bookingRules.js'
+import {
+  slotMoment, cancelDeadline, phaseOf, roleOf, moveDeadline, freeCancelUntil, MAX_MOVES,
+} from './bookingRules.js'
 
 // A slot in Firestore holds the uids of the students who booked it (bookedBy).
 // The browser only gets counts, plus 'mine' = did the person asking book this slot.
@@ -26,6 +28,12 @@ export function publicSlot(slot, uid) {
     past: clockOk ? startsAt <= now : false, // the start time has gone
     cancellable: clockOk ? now < cancelDeadline(startsAt) : false, // a booking made now could still be cancelled
     cancelBefore: clockOk ? cancelDeadline(startsAt).toISOString() : '',
+    startsAt: clockOk ? startsAt.toISOString() : '',
+    // for the teacher's "Start times" list: how often it was moved, and until when it can be moved
+    // with students in it (an empty start time can be changed any time before it starts)
+    moves: slot.moves || 0,
+    movesLeft: Math.max(MAX_MOVES - (slot.moves || 0), 0),
+    moveBefore: clockOk ? moveDeadline(startsAt).toISOString() : '',
   }
 }
 
@@ -39,7 +47,38 @@ export function publicOffer(offer, uid) {
   return { ...rest, title: offer.title || offer.skill, isMine: teacherUid === uid, slots: slots }
 }
 
-// One booking, as seen by the person asking (uid). The flags canCancel, canConfirm and
+// The notice this person has not dismissed yet (shown on Home and My Classes), or null.
+//   teacher: 'cancelled' (the student cancelled) or 'moved' (the student moved to another time)
+//   student: 'teacherMoved' or 'teacherCancelled' (the teacher moved or cancelled the start time)
+function noticeOf(booking, role) {
+  if (role === 'teacher' && booking.teacherNoticeSeen === false) {
+    // cancellations saved before notices had a type are 'cancelled'
+    const type = booking.teacherNotice || (booking.status === 'cancelled' ? 'cancelled' : '')
+    if (type === 'cancelled') {
+      return { type: type, at: booking.teacherNoticeAt || booking.cancelledAt || '' }
+    }
+    if (type === 'moved') {
+      return { type: type, from: booking.teacherNoticeFrom || '', to: booking.teacherNoticeTo || '', at: booking.teacherNoticeAt || '' }
+    }
+  }
+  if (role === 'learner' && booking.learnerNoticeSeen === false) {
+    if (booking.learnerNotice === 'teacherMoved') {
+      return {
+        type: 'teacherMoved',
+        from: booking.learnerNoticeFrom || '',
+        to: booking.learnerNoticeTo || '',
+        note: booking.learnerNoticeNote || '',
+        at: booking.learnerNoticeAt || '',
+      }
+    }
+    if (booking.learnerNotice === 'teacherCancelled') {
+      return { type: 'teacherCancelled', note: booking.learnerNoticeNote || '', at: booking.learnerNoticeAt || '' }
+    }
+  }
+  return null
+}
+
+// One booking, as seen by the person asking (uid). The flags canCancel, canMove, canConfirm and
 // canReport are worked out here, so the buttons on "My sessions" simply follow them.
 export function publicBooking(booking, uid, now = new Date()) {
   const role = roleOf(booking, uid)
@@ -64,6 +103,9 @@ export function publicBooking(booking, uid, now = new Date()) {
       approvedAt: saved.approvedAt || '',
     }
   })
+  // cancelling (always for a full refund) and moving to another start time: see bookingRules.js
+  const cancelUntil = freeCancelUntil(booking) // null: it can no longer be cancelled at all
+  const studentMoves = booking.studentMoves || 0
   const firstIncomplete = allStageProgress.findIndex((stage) => !stage.approved)
   const visibleStageCount = firstIncomplete === -1 ? allStageNames.length : firstIncomplete + 1
   const stageNames = allStageNames.slice(0, visibleStageCount)
@@ -83,6 +125,7 @@ export function publicBooking(booking, uid, now = new Date()) {
     teacherName: booking.teacherName,
     learnerName: booking.learnerName,
     otherUid: role === 'learner' ? booking.teacherUid : booking.learnerUid,
+    slotId: booking.slotId,
     slotDate: booking.slotDate,
     slotTime: booking.slotTime,
     totalStageCount: allStageNames.length,
@@ -94,20 +137,24 @@ export function publicBooking(booking, uid, now = new Date()) {
     sessionDurationMinutes: booking.sessionDurationMinutes || 60,
     startsAt: booking.startsAt,
     finishAfter: booking.finishAfter,
-    cancelBefore: cancelDeadline(startsAt).toISOString(),
+    cancelBefore: cancelUntil ? cancelUntil.toISOString() : '', // the end of free cancellation ('' = none)
     creditCost: booking.creditCost,
     status: booking.status,
     phase: phase,
     myConfirmed: myConfirmed === true,
     otherConfirmed: otherConfirmed === true,
-    // the student can cancel until the class starts; more than 24 hours before it is refunded,
-    // later than that the credits go to the teacher
-    canCancel: learnerSide && booking.status === 'booked' && now < startsAt,
-    cancelRefunds: now < cancelDeadline(startsAt),
-    refunded: booking.refunded !== false, // false only for a late cancellation, paid to the teacher (older ones were all refunded)
+    // the student can cancel for a full refund until 24 hours before the start (until the start
+    // if the teacher moved it; never after moving it within the last 24 hours)
+    canCancel: learnerSide && booking.status === 'booked' && cancelUntil !== null && now < cancelUntil,
+    canMove: learnerSide && booking.status === 'booked' && now < moveDeadline(startsAt) && studentMoves < MAX_MOVES,
+    moveBefore: moveDeadline(startsAt).toISOString(),
+    movesLeft: Math.max(MAX_MOVES - studentMoves, 0),
+    movedLate: booking.movedLate === true,
+    teacherMoved: booking.teacherMoved === true,
+    refunded: booking.refunded !== false, // false only for an old late cancellation that paid the teacher
     cancelledAt: booking.cancelledAt || '',
-    // the teacher has not yet seen that the student cancelled (only set by cancellations from now on)
-    cancelNotice: role === 'teacher' && booking.status === 'cancelled' && booking.teacherNoticeSeen === false,
+    startTimeCancelled: booking.startTimeCancelled === true, // the teacher cancelled the whole start time
+    notice: noticeOf(booking, role), // something this person has not pressed "Got it" on yet
     // a student who joined since the teacher last opened the course's Students list (bookings from now on)
     newStudent: role === 'teacher' && booking.status === 'booked' && booking.teacherSeenJoin === false,
     // stages the teacher approved since the student last opened the class's Details

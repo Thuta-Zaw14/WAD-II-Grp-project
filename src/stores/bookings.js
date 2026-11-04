@@ -2,7 +2,7 @@ import { ref, computed } from 'vue'
 import { defineStore } from 'pinia'
 import {
   getMyBookings, bookSlot, cancelBooking, confirmBooking, reportBooking, removeStudent, markSeenByTeacher,
-  markSeenByLearner, submitStageReflection, approveBookingStage, errorText,
+  markSeenByLearner, submitStageReflection, approveBookingStage, moveBooking, dismissBookingNotice, errorText,
 } from '../services/api'
 import { learnerActionCount, studentActionCount } from '../services/attention'
 import { useOffersStore } from './offers'
@@ -25,19 +25,22 @@ export const useBookingsStore = defineStore('bookings', () => {
   const learning = computed(() => bookings.value.filter((b) => b.role === 'learner'))
   const teaching = computed(() => bookings.value.filter((b) => b.role === 'teacher'))
 
-  // students who cancelled one of my classes, that I have not dismissed yet (newest first)
-  const cancelNotices = computed(() =>
-    teaching.value
-      .filter((b) => b.cancelNotice)
-      .sort((a, b) => (a.cancelledAt < b.cancelledAt ? 1 : -1))
+  // Notices I have not pressed "Got it" on yet (newest first). As a teacher: a student cancelled
+  // or moved one of my classes. As a student: the teacher moved or cancelled a class I attend.
+  const notices = computed(() =>
+    bookings.value
+      .filter((b) => b.notice)
+      .sort((a, b) => (a.notice.at < b.notice.at ? 1 : -1))
   )
 
-  // The red numbers (see services/attention.js). Classes I attend: unread messages and newly
-  // approved stages. Classes I host: reflections to approve, unread messages, new students and
-  // cancellations. Together they are the number on "My Classes" in the nav bar.
-  const learningAlertCount = computed(() => learning.value.reduce((total, b) => total + learnerActionCount(b), 0))
+  // The red numbers (see services/attention.js). Classes I attend: unread messages, newly
+  // approved stages and notices. Classes I host: reflections to approve, unread messages, new
+  // students and notices. Together they are the number on "My Classes" in the nav bar.
+  const learningAlertCount = computed(
+    () => learning.value.reduce((total, b) => total + learnerActionCount(b) + (b.notice ? 1 : 0), 0)
+  )
   const teachingAlertCount = computed(
-    () => teaching.value.reduce((total, b) => total + studentActionCount(b), 0) + cancelNotices.value.length
+    () => teaching.value.reduce((total, b) => total + studentActionCount(b) + (b.notice ? 1 : 0), 0)
   )
   const attentionCount = computed(() => learningAlertCount.value + teachingAlertCount.value)
 
@@ -102,8 +105,7 @@ export const useBookingsStore = defineStore('bookings', () => {
     }
   }
 
-  // Cancel a booking (the credit comes back, unless it was less than 24 hours before the start:
-  // then it goes to the teacher).
+  // Cancel a booking: the credits always come back (the server says no when it is too late).
   // Returns true / false like book().
   async function cancel(id) {
     busyId.value = id
@@ -113,11 +115,25 @@ export const useBookingsStore = defineStore('bookings', () => {
       replaceBooking(data.booking)
       if (data.offer) useOffersStore().replaceOffer(data.offer) // the seat is free again
       await useProfileStore().fetchProfile()
-      useToastStore().show(
-        data.booking.refunded === false
-          ? 'Booking cancelled. It was less than 24 hours before the start, so the credits went to the teacher.'
-          : 'Booking cancelled. Your credits are back.'
-      )
+      useToastStore().show('Booking cancelled. Your credits are back.')
+      busyId.value = ''
+      return true
+    } catch (err) {
+      actionError.value = errorText(err)
+      busyId.value = ''
+      return false
+    }
+  }
+
+  // Move a class I attend to another start time of the same course. Returns true / false.
+  async function move(id, slotId) {
+    busyId.value = id
+    actionError.value = ''
+    try {
+      const data = await moveBooking(id, slotId)
+      replaceBooking(data.booking)
+      if (data.offer) useOffersStore().replaceOffer(data.offer) // the seat counts changed
+      useToastStore().show('Your class was moved to the new time.')
       busyId.value = ''
       return true
     } catch (err) {
@@ -224,10 +240,10 @@ export const useBookingsStore = defineStore('bookings', () => {
     busyId.value = ''
   }
 
-  // the teacher pressed "Got it" on a cancellation notice
+  // "Got it" on a notice (a class was cancelled or moved)
   async function dismissNotice(id) {
     try {
-      const data = await markSeenByTeacher(id)
+      const data = await dismissBookingNotice(id)
       replaceBooking(data.booking)
     } catch (err) {
       useToastStore().show('Could not dismiss the notice: ' + errorText(err))
@@ -261,9 +277,9 @@ export const useBookingsStore = defineStore('bookings', () => {
 
   return {
     bookings, loading, error, actionError, busyId, booking,
-    learning, teaching, heldCredits, cancelNotices,
+    learning, teaching, heldCredits, notices,
     learningAlertCount, teachingAlertCount, attentionCount,
-    fetchBookings, refreshBookings, book, cancel, confirm, report, remove, reset,
+    fetchBookings, refreshBookings, book, cancel, move, confirm, report, remove, reset,
     submitReflection, approveStage, dismissNotice, markStudentsSeen, markApprovalsSeen,
   }
 })
