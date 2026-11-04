@@ -2,7 +2,7 @@ import express from 'express'
 import { verifyToken } from '../middleware/verifyToken.js'
 import { findDocsWhereEquals } from '../models/dbQuery.js'
 import {
-  cancelBooking, confirmBooking, reportBooking, removeStudent,
+  cancelBooking, confirmBooking, reportBooking, removeStudent, markSeenByTeacher, markSeenByLearner,
   submitStageReflection, approveBookingStage,
 } from '../models/bookings.js'
 import { publicBooking, publicOffer, publicMessage, publicChatInfo } from '../models/publicView.js'
@@ -99,6 +99,34 @@ router.post('/:id/cancel', verifyToken, async (req, res) => {
   } catch (err) {
     console.log('cancelBooking failed:', err.message)
     res.status(500).json({ error: 'Could not cancel the booking. Please try again.' })
+  }
+})
+
+// The teacher has seen this booking: a new student, or the notice that a student cancelled
+router.post('/:id/teacher-seen', verifyToken, async (req, res) => {
+  try {
+    const result = await markSeenByTeacher(req.user.uid, req.params.id)
+    if (result.error) {
+      return res.status(result.status).json({ error: result.error })
+    }
+    res.json({ booking: publicBooking(result.booking, req.user.uid) })
+  } catch (err) {
+    console.log('markSeenByTeacher failed:', err.message)
+    res.status(500).json({ error: 'Could not update the booking. Please try again.' })
+  }
+})
+
+// The student has seen this booking: the stages approved since they last opened its Details
+router.post('/:id/learner-seen', verifyToken, async (req, res) => {
+  try {
+    const result = await markSeenByLearner(req.user.uid, req.params.id)
+    if (result.error) {
+      return res.status(result.status).json({ error: result.error })
+    }
+    res.json({ booking: publicBooking(result.booking, req.user.uid) })
+  } catch (err) {
+    console.log('markSeenByLearner failed:', err.message)
+    res.status(500).json({ error: 'Could not update the booking. Please try again.' })
   }
 })
 

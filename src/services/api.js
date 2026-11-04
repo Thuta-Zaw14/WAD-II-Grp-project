@@ -193,6 +193,20 @@ export async function cancelBooking(id) {
   return response.data
 }
 
+// the teacher has seen this booking: a student who just joined, or the notice that a student
+// cancelled ("Got it") -> { booking }
+export async function markSeenByTeacher(id) {
+  const response = await axios.post(API + '/bookings/' + encodeURIComponent(id) + '/teacher-seen', {}, await authConfig())
+  return response.data
+}
+
+// the student opened the class's Details: the stages approved since they last looked are seen
+// -> { booking }
+export async function markSeenByLearner(id) {
+  const response = await axios.post(API + '/bookings/' + encodeURIComponent(id) + '/learner-seen', {}, await authConfig())
+  return response.data
+}
+
 // -> { booking }
 export async function confirmBooking(id) {
   const response = await axios.post(API + '/bookings/' + encodeURIComponent(id) + '/confirm', {}, await authConfig())

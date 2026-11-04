@@ -7,6 +7,8 @@ import { useProfileStore } from '../stores/profile'
 import { useOffersStore } from '../stores/offers'
 import { useToastStore } from '../stores/toast'
 import NavBar from '../components/NavBar.vue'
+import CancelNotices from '../components/CancelNotices.vue'
+import { unreadOf, reflectionsWaiting, studentActionCount } from '../services/attention'
 import LoadingText from '../components/LoadingText.vue'
 import EmptyState from '../components/EmptyState.vue'
 import ClassModal from '../components/ClassModal.vue'
@@ -168,24 +170,9 @@ function activeStudentCount(offerId) {
 }
 
 // ---------- The red numbers ----------
-// unread messages from the other person in one booking's chat
-function unreadOf(b) {
-  if (typeof b.unreadCount === 'number') return b.unreadCount
-  return b.unreadChat ? 1 : 0 // a server from before unreadCount
-}
+// What counts is in services/attention.js, so this page and "My Classes" in the nav bar agree.
 
-// reflections a student sent that the teacher has not approved yet
-function reflectionsWaiting(b) {
-  if (b.status !== 'booked') return 0
-  return (b.stageProgress || []).filter((stage) => stage.reflection && !stage.approved).length
-}
-
-// what one of my students is waiting on me for: reflections to approve and messages to read
-function studentActionCount(b) {
-  return reflectionsWaiting(b) + unreadOf(b)
-}
-
-// the same, added up for every student of one course I host
+// added up for every student of one course I host (reflections, messages, new students)
 function courseActionCount(offerId) {
   let total = 0
   for (const b of store.teaching) {
@@ -194,11 +181,20 @@ function courseActionCount(offerId) {
   return total
 }
 
-// the totals next to the two headings (also seen when the lists are folded on a phone)
-const learningAlertCount = computed(() => store.learning.reduce((total, b) => total + unreadOf(b), 0))
-const teachingAlertCount = computed(() =>
-  profileStore.myOffers.reduce((total, offer) => total + courseActionCount(offer.id), 0)
-)
+// the totals next to the two headings (also seen when the lists are folded on a phone);
+// the hosting one also counts cancellation notices until the teacher presses "Got it"
+const learningAlertCount = computed(() => store.learningAlertCount)
+const teachingAlertCount = computed(() => store.teachingAlertCount)
+
+// The students of the course whose list is open who were new when it was opened: they keep a
+// "New" tag while the list is open, even though opening it marks them seen straight away.
+const newStudentIds = ref([])
+
+function openStudents(offer) {
+  newStudentIds.value = store.teaching.filter((b) => b.offerId === offer.id && b.newStudent).map((b) => b.id)
+  open({ type: 'students', offerId: offer.id })
+  store.markStudentsSeen(offer.id)
+}
 
 function upcomingSlots(offer) {
   return (offer.slots || []).filter((slot) => !slot.past)
@@ -243,9 +239,24 @@ const topOffer = computed(() => {
 })
 
 // ---------- Class details (a class I attend) ----------
+// How many stages the teacher approved since the student last opened these Details. Kept while
+// the popup is open (to tag them "New"), even though opening it marks them seen straight away.
+const newlyApprovedCount = ref(0)
+
+// the latest newly approved stages get the "New" tag (stages are approved in order)
+function isNewlyApproved(b, index) {
+  const approved = []
+  ;(b.stageProgress || []).forEach((stage, i) => {
+    if (stage.approved) approved.push(i)
+  })
+  return approved.slice(approved.length - newlyApprovedCount.value).includes(index)
+}
+
 async function openDetails(b) {
   extraStep.value = ''
+  newlyApprovedCount.value = b.newApprovals || 0
   open({ type: 'details', bookingId: b.id })
+  if (newlyApprovedCount.value > 0) store.markApprovalsSeen(b.id)
   // the description lives on the course, so load the courses once if they are not here yet
   if (offersStore.offers.length === 0 && !offersStore.loading) {
     await offersStore.fetchOffers()
@@ -433,6 +444,9 @@ async function addSlot() {
     <LoadingText v-else-if="store.loading && store.bookings.length === 0" text="Loading your classes..." />
     <p v-if="profileStore.error" class="alert alert-danger" role="alert">{{ profileStore.error }}</p>
 
+    <!-- students who cancelled one of my classes, and where the credits went -->
+    <CancelNotices />
+
     <div class="row g-4">
       <!-- ========== Classes I Am Attending ========== -->
       <section class="col-12 col-lg-6" aria-labelledby="attending-title">
@@ -449,7 +463,7 @@ async function addSlot() {
               <span>
                 Classes I Am Attending
                 <span v-if="learningAlertCount > 0" class="count-alert ms-1">
-                  {{ learningAlertCount }}<span class="visually-hidden"> unread messages</span>
+                  {{ learningAlertCount }}<span class="visually-hidden"> things waiting for you</span>
                 </span>
               </span>
               <span class="chevron" aria-hidden="true">▾</span>
@@ -457,7 +471,7 @@ async function addSlot() {
             <template v-else>
               Classes I Am Attending
               <span v-if="learningAlertCount > 0" class="count-alert ms-1">
-                {{ learningAlertCount }}<span class="visually-hidden"> unread messages</span>
+                {{ learningAlertCount }}<span class="visually-hidden"> things waiting for you</span>
               </span>
             </template>
           </h2>
@@ -465,7 +479,7 @@ async function addSlot() {
           <div v-for="b in store.learning" :key="b.id" class="class-row">
             <div class="d-flex justify-content-between align-items-start gap-2">
               <div class="min-w-0">
-                <h3 class="h6 mb-1">{{ b.title }}</h3>
+                <h3 class="h6 mb-1" :class="{ 'cancelled-title': b.status === 'cancelled' }">{{ b.title }}</h3>
                 <p v-if="isOpen('attending')" class="small text-muted mb-1">Taught by {{ b.teacherName }} &middot; starts {{ formatTime(b.startsAt) }}</p>
               </div>
               <span v-if="isOpen('attending')" class="status flex-shrink-0" :class="'status-' + b.phase">{{ phaseLabels[b.phase] }}</span>
@@ -490,7 +504,12 @@ async function addSlot() {
             </div>
 
             <div class="d-flex flex-wrap gap-2">
-              <button type="button" class="btn btn-sm btn-outline-secondary" @click="openDetails(b)">Details</button>
+              <button type="button" class="btn btn-sm btn-outline-secondary position-relative" @click="openDetails(b)">
+                Details
+                <span v-if="b.newApprovals > 0" class="count-alert count-corner">
+                  {{ b.newApprovals }}<span class="visually-hidden"> stages newly approved</span>
+                </span>
+              </button>
               <button
                 v-if="b.status === 'booked' && currentStageIndex(b) >= 0"
                 type="button"
@@ -564,11 +583,11 @@ async function addSlot() {
               <button
                 type="button"
                 class="btn btn-sm btn-outline-secondary position-relative"
-                @click="open({ type: 'students', offerId: offer.id })"
+                @click="openStudents(offer)"
               >
                 Students
                 <span v-if="courseActionCount(offer.id) > 0" class="count-alert count-corner">
-                  {{ courseActionCount(offer.id) }}<span class="visually-hidden"> reflections or messages waiting for you</span>
+                  {{ courseActionCount(offer.id) }}<span class="visually-hidden"> things waiting for you: reflections, messages or new students</span>
                 </span>
               </button>
               <button type="button" class="btn btn-sm btn-brand" @click="openSlot(offer)">Add time slot</button>
@@ -610,7 +629,10 @@ async function addSlot() {
       <h3 class="h6">Stages</h3>
       <ol class="stage-list">
         <li v-for="(stage, index) in topBooking.stageProgress" :key="index" class="stage-item">
-          <span>{{ stage.stageName }}</span>
+          <span>
+            {{ stage.stageName }}
+            <span v-if="isNewlyApproved(topBooking, index)" class="new-tag">New</span>
+          </span>
           <span class="stage-pill" :class="'stage-' + stageState(stage)">{{ stageLabels[stageState(stage)] }}</span>
         </li>
         <li v-for="n in lockedStageCount(topBooking)" :key="'locked-' + n" class="stage-item stage-locked">
@@ -737,7 +759,10 @@ async function addSlot() {
   >
     <button v-for="b in studentsOf(topOffer.id)" :key="b.id" type="button" class="student-row" @click="openStudent(b)">
       <span class="min-w-0">
-        <strong class="d-block text-truncate">{{ b.learnerName }}</strong>
+        <strong class="d-block text-truncate">
+          {{ b.learnerName }}
+          <span v-if="newStudentIds.includes(b.id)" class="new-tag">New</span>
+        </strong>
         <small class="text-muted">Starts {{ formatTime(b.startsAt) }} &middot; {{ phaseLabels[b.phase] }}</small>
       </span>
       <span
@@ -969,6 +994,23 @@ async function addSlot() {
   top: -9px;
   right: -9px;
   border: 2px solid var(--k-surface);
+}
+
+/* a class I cancelled (or was removed from): its title in a lighter grey */
+.cancelled-title {
+  color: #a39a8e;
+}
+
+/* "New" next to a student who joined since the teacher last opened the Students list */
+.new-tag {
+  margin-left: 6px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--k-danger);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  vertical-align: middle;
 }
 
 /* ---------- Inside the popups ---------- */

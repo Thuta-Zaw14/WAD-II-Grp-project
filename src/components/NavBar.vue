@@ -6,6 +6,7 @@ import { auth } from '../firebase'
 import { useProfileStore } from '../stores/profile'
 import { useOffersStore } from '../stores/offers'
 import { useBookingsStore } from '../stores/bookings'
+import { useReportsStore } from '../stores/reports'
 import LogoMark from './LogoMark.vue'
 
 // The bar at the top of every page after login: the links, my credits, and a menu
@@ -15,14 +16,22 @@ const router = useRouter()
 const profileStore = useProfileStore()
 const offersStore = useOffersStore()
 const bookingsStore = useBookingsStore()
+const reportsStore = useReportsStore()
 
-// "paths" are the addresses where the link is highlighted, e.g. a chat belongs to My classes
-const links = [
-  { label: 'Courses', to: '/courses', paths: ['/courses', '/discussion'] },
-  { label: 'My Classes', to: '/classes', paths: ['/classes', '/sessions', '/chat'] },
-  { label: 'Insights', to: '/insights', paths: ['/insights'] },
-  { label: 'Report', to: '/reports', paths: ['/reports'] },
-]
+// "paths" are the addresses where the link is highlighted, e.g. a chat belongs to My classes.
+// "count" is the red number on the link: what is waiting for me on that page
+// (My Classes: services/attention.js; Report: admin replies I have not opened yet).
+const links = computed(() => [
+  { label: 'Courses', to: '/courses', paths: ['/courses', '/discussion'], count: 0 },
+  { label: 'My Classes', to: '/classes', paths: ['/classes', '/sessions', '/chat'], count: bookingsStore.attentionCount },
+  { label: 'Insights', to: '/insights', paths: ['/insights'], count: 0 },
+  { label: 'Report', to: '/reports', paths: ['/reports'], count: reportsStore.newsCount },
+])
+
+// what the red numbers say to a screen reader
+function countLabel(link) {
+  return link.to === '/reports' ? ' reports with news' : ' things waiting for you'
+}
 
 // the pages that belong to "Profile" in the menu under my name
 const profilePaths = ['/profile', '/skills', '/teach', '/learn']
@@ -99,14 +108,27 @@ onMounted(async () => {
   // some pages (the chat, the discussion) do not load the profile themselves, but the
   // credits and my name come from it
   await auth.authStateReady()
-  if (auth.currentUser && profileStore.profile === null && !profileStore.loading) {
+  if (!auth.currentUser) return
+  if (profileStore.profile === null && !profileStore.loading) {
     profileStore.fetchProfile()
   }
+
+  // the red numbers on My Classes and Report: load them on any page, and keep them fresh
+  if (bookingsStore.bookings.length === 0 && !bookingsStore.loading) bookingsStore.fetchBookings()
+  reportsStore.refreshNews()
+  refreshTimer = setInterval(() => {
+    if (document.hidden || !auth.currentUser) return
+    bookingsStore.refreshBookings()
+    reportsStore.refreshNews()
+  }, 30 * 1000)
 })
+
+let refreshTimer = null
 
 onUnmounted(() => {
   document.removeEventListener('click', onDocumentClick)
   document.removeEventListener('keydown', onKey)
+  clearInterval(refreshTimer)
 })
 
 async function logout() {
@@ -116,6 +138,7 @@ async function logout() {
   profileStore.reset()
   offersStore.reset()
   bookingsStore.reset()
+  reportsStore.reset()
   router.push('/')
 }
 </script>
@@ -138,6 +161,9 @@ async function logout() {
           :class="{ active: isActive(link) }"
         >
           {{ link.label }}
+          <span v-if="link.count > 0" class="nav-count">
+            {{ link.count }}<span class="visually-hidden">{{ countLabel(link) }}</span>
+          </span>
         </RouterLink>
       </nav>
 
@@ -192,6 +218,9 @@ async function logout() {
           :class="{ active: isActive(link) }"
         >
           {{ link.label }}
+          <span v-if="link.count > 0" class="nav-count">
+            {{ link.count }}<span class="visually-hidden">{{ countLabel(link) }}</span>
+          </span>
         </RouterLink>
 
         <div class="mobile-me d-flex align-items-center gap-2 mt-2 pt-2">
@@ -226,6 +255,24 @@ async function logout() {
   font-weight: 500;
   text-decoration: none;
   white-space: nowrap;
+}
+
+/* the red number on a link: something on that page is waiting for me */
+.nav-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  margin-left: 4px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--k-danger);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  vertical-align: middle;
 }
 
 .link:hover {

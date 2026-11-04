@@ -105,6 +105,13 @@ export function publicBooking(booking, uid, now = new Date()) {
     canCancel: learnerSide && booking.status === 'booked' && now < startsAt,
     cancelRefunds: now < cancelDeadline(startsAt),
     refunded: booking.refunded !== false, // false only for a late cancellation, paid to the teacher (older ones were all refunded)
+    cancelledAt: booking.cancelledAt || '',
+    // the teacher has not yet seen that the student cancelled (only set by cancellations from now on)
+    cancelNotice: role === 'teacher' && booking.status === 'cancelled' && booking.teacherNoticeSeen === false,
+    // a student who joined since the teacher last opened the course's Students list (bookings from now on)
+    newStudent: role === 'teacher' && booking.status === 'booked' && booking.teacherSeenJoin === false,
+    // stages the teacher approved since the student last opened the class's Details
+    newApprovals: learnerSide ? booking.learnerUnseenApprovals || 0 : 0,
     canConfirm: booking.status === 'booked' && phase === 'readyToFinish' && myConfirmed !== true,
     canReport: booking.status === 'booked' && now >= startsAt,
     reportedByMe: reportedByMe,
