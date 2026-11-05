@@ -46,7 +46,8 @@ Users
   2. Users can then click on Login or Sign up button to either login to their account or to sign up for an account
     2a. After signing up, they will go to the /home page and they will be able to see a tutorial guide on setting up their accounts
     2b. After logging in, they will go to /home page, if they have completed the tutorial guide, the tutorial guide will not appear, if not, it will show the uncompleted steps collapsed or uncollapsed depending on how user configure it in the previous session.
-    2c. Example accounts (account email and password does not have quotations):
+    2c. If users are issued warnings, they will see it at the top at the home page.
+    2d. Example accounts (account email and password does not have quotations):
     User Example Account 1 (Student account)
     Email: "demo5@gmail.com"
     Password: "iamdemo5"
