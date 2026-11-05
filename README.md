@@ -1,6 +1,7 @@
 Admin 
  - Admin Function
     1. Login to an admin account in the Login page (account email/password does not have quotations)
+    
     Admin Example Account 1
     Email: "admin1@example.com"
     Password: "iLikeeWAD2!"
@@ -22,18 +23,22 @@ Admin
     3. Click on "View" button to view a particular user profile in admin view
       In user profile, admin can review users details, take actions, warning history and report history.
       Admin can view the profile of the reporter in admin mode by clicking the reporter's name from the user profile
-      3ai. If user is active, click on "Ban User" to ban a user, it will prompt a confirmation alert to confirm a ban,
-      when "OK" is clicked, it will ban the user
+      <br>
+      3ai. If user is active, click on "Ban User" to ban a user, it will prompt a confirmation alert to confirm a ban, when "OK" is clicked, it will ban the user
+      <br>
       3aii. If user is banned, click on "Unban User" to unban user, it will prompt a confirmation alert to confirm an unban
       when "OK" is clicked, it will unban the user
+      <br>
       3b. Admin can send out warnings to users after admin reviewed their activities without banning them
 
     4. Click on "Disputes" to review reports
 
     5. Click on "Message reports" to see the decisions made and what is handled recently
 
-   Others: 
+   - Others: 
+      <br>
       There is no way of creating an admin account from the frontend (Hi prof, if you need more accounts, can ask us to create more)
+      <br>
       Admin will be logged out if they exit the tab and they have to log in again if they want to use another tab
 
 
@@ -44,10 +49,11 @@ Users
   1. When users first come to the web app, they will go to the landing page to find out what the app does
   
   2. Users can then click on Login or Sign up button to either login to their account or to sign up for an account
-    2a. After signing up, they will go to the /home page and they will be able to see a tutorial guide on setting up their accounts
-    2b. After logging in, they will go to /home page, if they have completed the tutorial guide, the tutorial guide will not appear, if not, it will show the uncompleted steps collapsed or uncollapsed depending on how user configure it in the previous session.
-    2c. If users are issued warnings, they will see it at the top at the home page.
-    2d. Example accounts (account email and password does not have quotations):
+    1. After signing up, they will go to the /home page and they will be able to see a tutorial guide on setting up their accounts
+    2. After logging in, they will go to /home page, if they have completed the tutorial guide, the tutorial guide will not appear, if not, it will show the uncompleted steps collapsed or uncollapsed depending on how user configure it in the previous session.
+    3. If users are issued warnings, they will see it at the top at the home page.
+    4. Example accounts (account email and password does not have quotations):
+    
     User Example Account 1 (Student account)
     Email: "demo5@gmail.com"
     Password: "iamdemo5"
@@ -69,15 +75,16 @@ Users
     Password: "iamrefer"
 
   3. Users can edit their profile, change password, update their preferences, manage their teaching and learning skills.
-    3a. Users must declare the skills they can teach before they can add courses that they want to teach.
-    3b. Completed skill courses will appear in the skill card.
+    1. Users must declare the skills they can teach before they can add courses that they want to teach.
+    2. Completed skill courses will appear in the skill card.
   
   4. In the courses pages, users can search for a course or taught by a specific user, filter by locations, browse courses, view details, book a session, look and post questions & discussions about a specific course by a specific user. 
-
+  <br>
   5a. After that, users can view their classes in "My Classes". They can view details of the booked course, do a reflection after they have completed the course and chat with the instructor for other details under "Classes I Am Attending".
+  <br>
   5b. Also, users can see the classes they are hosting, view current and past students, chat with a specific student and edit course details. 
 
   6. In the insights tab, users can view statistics what are the most wanted skills by other students.
-    6a. Users can send their friends a referral link for them to sign up and earn credits.
+    1. Users can send their friends a referral link for them to sign up and earn credits.
 
   7. In the reports tab, users can file a report for various issues and see past reports and status.
