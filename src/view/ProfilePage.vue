@@ -221,7 +221,7 @@ async function removeSkill(item, skill) {
                   <small class="text-muted d-block">
                     {{ offer.category }} &middot;
                     {{ offer.mode === 'online' ? 'Online' : offer.region + ' - ' + offer.place }}
-                    &middot; {{ offer.slots.length }} start time{{ offer.slots.length === 1 ? '' : 's' }}
+                    &middot; {{ (offer.slots ?? []).length }} start time{{ (offer.slots ?? []).length === 1 ? '' : 's' }}
                   </small>
                 </div>
                 <button type="button" class="btn btn-sm btn-outline-secondary" @click="router.push('/teach/' + offer.id)">
