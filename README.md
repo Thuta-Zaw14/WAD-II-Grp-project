@@ -79,9 +79,10 @@ Users
     2. Completed skill courses will appear in the skill card.
   
   4. In the courses pages, users can search for a course or taught by a specific user, filter by locations, browse courses, view details, book a session, look and post questions & discussions about a specific course by a specific user. 
-
-  - 5a. After that, users can view their classes in "My Classes". They can view details of the booked course, do a reflection after they have completed the course and chat with the instructor for other details under "Classes I Am Attending".
-  - 5b. Also, users can see the classes they are hosting, view current and past students, chat with a specific student and edit course details. 
+  <br>
+  5a. After that, users can view their classes in "My Classes". They can view details of the booked course, do a reflection after they have completed the course and chat with the instructor for other details under "Classes I Am Attending".
+  <br>
+  5b. Also, users can see the classes they are hosting, view current and past students, chat with a specific student and edit course details. 
 
   6. In the insights tab, users can view statistics what are the most wanted skills by other students.
     1. Users can send their friends a referral link for them to sign up and earn credits.
