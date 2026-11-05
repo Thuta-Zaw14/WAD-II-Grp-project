@@ -12,6 +12,7 @@ import discussionRoutes from './routes/discussions.js'
 import messageReportRoutes from './routes/messageReports.js'
 import reportRoutes from './routes/reports.js'
 import placeRoutes from './routes/places.js'
+import progressRoutes from './routes/progress.js'
 
 const app = express()
 
@@ -27,6 +28,10 @@ if (process.env.VERCEL) {
   app.set('trust proxy', 1)
 }
 
+// The Progress page sends photos of the students' work (made small in the browser, see
+// src/services/imageCompress.js), so its requests may be bigger than the usual 100 kB. Only there.
+// (Vercel itself accepts at most 4.5 MB per request.) The parser below then skips these requests.
+app.use('/api/progress', express.json({ limit: '4mb' }))
 app.use(express.json())
 
 // A simple limit on how often one address may call the API: 300 requests a minute is far more
@@ -58,6 +63,7 @@ app.use('/api/discussions', discussionRoutes)
 app.use('/api/message-reports', messageReportRoutes)
 app.use('/api/reports', reportRoutes)
 app.use('/api/places', placeRoutes) // the meeting-place search on the teach form (asks OneMap)
+app.use('/api/progress', progressRoutes) // homework, feedback and mastery (the Progress page)
 
 // Anything a route did not handle itself (a broken JSON body, an unexpected Firestore error...)
 // ends here. Express's own handler would send the stack trace to the browser, so send a plain

@@ -118,3 +118,42 @@ Users
     1. Users can send their friends a referral link for them to sign up and earn credits.
 
   7. In the reports tab, users can file a report for various issues and see past reports and status.
+
+  8. In the Progress tab, users practise after their classes, get feedback and work towards mastering each skill.
+    1. Learning side: homework still to do (with a countdown), an on-time streak, average stars, badges, and a "skill journey" for every course (Class taken → Course finished → Practice → Mastery).
+    2. Students open an assignment and send photos (made smaller in the browser and saved in Firestore) and/or YouTube or Google Drive video links, with a note. They can change their work until it is graded or the due date passes. Both sides can comment on the work.
+    3. Teaching side (shown to anyone who teaches a course): a "Waiting for your review" inbox, and per course: "+ New assignment" (title, instructions, due date, which students), each assignment's hand-in rate, and every student with a "Final grade" button.
+    4. Instructors grade work with 1–5 stars and feedback, or "Ask for a redo" (which re-opens the work for 3 days, even after the due date). They can edit an assignment to extend its due date or add students.
+    5. Once a course is finished, the instructor gives a final mastery level (Practising / Proficient / Mastered). It appears as a badge on the student's skill card on their profile.
+    6. Mastery bonus: a student who hands in every assignment of a course (at least 2) and reaches Mastered earns +1 time credit, once per skill and at most 3 times. Reaching Mastered also offers a shortcut to start teaching that skill.
+    7. Try it: log in as make@gmail.com (instructor), open Progress → Teaching, and set an assignment on one of your finished courses for demo5. Then log in as demo5@gmail.com and open Progress to hand it in.
+
+------------------------------------------------------------------------------------------------------------------
+
+## Progress page tests (Sahanya)
+
+| Kind | File | What it checks |
+|---|---|---|
+| Unit | `tests/unit/progressRules.test.js` | homework status, time left, on-time streak, badges, YouTube links, when work can be sent (deadline + redo window), the mastery bonus and its anti-farming caps |
+| Component | `tests/component/AssignmentCard.test.js` | the student's homework card: "To do" / "Due soon" / "Missed" / "Graded" / "Redo requested", the countdown, the stars and the button |
+| Component | `tests/component/SubmissionReview.test.js` | the instructor's grading box: stars are required, feedback is trimmed, a redo needs a note, an existing grade is pre-filled |
+| E2E | `tests/e2e/progress-student.spec.js` | a student logs in → Progress → opens their homework → attaches a photo, a YouTube link and a note → sends it → sees "Waiting for feedback" |
+| E2E | `tests/e2e/progress-instructor.spec.js` | an instructor logs in → Progress → Teaching → sets a new assignment → reviews a student's work and grades it 4 stars → gives the final mastery level |
+
+Every element the tests use has a `data-testid`, so the tests don't break when text or styling changes.
+
+**Unit and component tests** (no server or login needed):
+
+    pnpm install
+    pnpm exec vitest run tests/unit/progressRules.test.js tests/component/AssignmentCard.test.js tests/component/SubmissionReview.test.js
+
+**End-to-end tests** (real browser, real login, real database):
+1. Put the service account key at `server/firebaseKey.json` (in the submission zip). The tests use it to create their own test course before they run, and delete it afterwards, so they can be run again and again.
+2. Install the browser once: `pnpm exec playwright install chromium`
+3. Terminal 1: `cd server`, `npm install`, `npm run dev`
+4. Terminal 2 (project root): `pnpm dev`
+5. Terminal 3 (project root). The new page is only on the live site after it is deployed, so point the tests at your own computer:
+   - macOS / Linux: `BASE_URL=http://localhost:5173 pnpm exec playwright test tests/e2e/progress-student.spec.js tests/e2e/progress-instructor.spec.js`
+   - Windows PowerShell: `$env:BASE_URL = "http://localhost:5173"; pnpm exec playwright test tests/e2e/progress-student.spec.js tests/e2e/progress-instructor.spec.js`
+
+The tests log in as the demo accounts above (instructor make@gmail.com, student demo5@gmail.com). To use other accounts, set `E2E_TEACHER_EMAIL`, `E2E_TEACHER_PASSWORD`, `E2E_STUDENT_EMAIL` and `E2E_STUDENT_PASSWORD`. A screenshot of each test is saved in `test-results/`.

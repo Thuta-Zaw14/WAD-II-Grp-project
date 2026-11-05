@@ -7,6 +7,7 @@ import { useProfileStore } from '../stores/profile'
 import { useOffersStore } from '../stores/offers'
 import { useBookingsStore } from '../stores/bookings'
 import { useReportsStore } from '../stores/reports'
+import { useProgressStore } from '../stores/progress'
 import LogoMark from './LogoMark.vue'
 
 // The bar at the top of every page after login: the links, my credits, and a menu
@@ -17,6 +18,7 @@ const profileStore = useProfileStore()
 const offersStore = useOffersStore()
 const bookingsStore = useBookingsStore()
 const reportsStore = useReportsStore()
+const progressStore = useProgressStore()
 
 // "paths" are the addresses where the link is highlighted, e.g. a chat belongs to My classes.
 // "count" is the red number on the link: what is waiting for me on that page
@@ -24,6 +26,8 @@ const reportsStore = useReportsStore()
 const links = computed(() => [
   { label: 'Courses', to: '/courses', paths: ['/courses', '/discussion'], count: 0 },
   { label: 'My Classes', to: '/classes', paths: ['/classes', '/sessions', '/chat'], count: bookingsStore.attentionCount },
+  // homework to do or with news, and work to grade (stores/progress.js)
+  { label: 'Progress', to: '/progress', paths: ['/progress'], count: progressStore.attentionCount },
   { label: 'Insights', to: '/insights', paths: ['/insights'], count: 0 },
   { label: 'Report', to: '/reports', paths: ['/reports'], count: reportsStore.newsCount },
 ])
@@ -116,14 +120,20 @@ onMounted(async () => {
   // the red numbers on My Classes and Report: load them on any page, and keep them fresh
   if (bookingsStore.bookings.length === 0 && !bookingsStore.loading) bookingsStore.fetchBookings()
   reportsStore.refreshNews()
+  if (!progressStore.overview && !progressStore.loading) progressStore.refreshOverview()
   refreshTimer = setInterval(() => {
     if (document.hidden || !auth.currentUser) return
     bookingsStore.refreshBookings()
     reportsStore.refreshNews()
+    // the Progress number reads more of the database, so only every 2 minutes (the free
+    // Spark plan allows 50,000 reads a day); the Progress pages refresh it after every change
+    ticks++
+    if (ticks % 4 === 0) progressStore.refreshOverview()
   }, 30 * 1000)
 })
 
 let refreshTimer = null
+let ticks = 0
 
 onUnmounted(() => {
   document.removeEventListener('click', onDocumentClick)
@@ -139,6 +149,7 @@ async function logout() {
   offersStore.reset()
   bookingsStore.reset()
   reportsStore.reset()
+  progressStore.reset()
   router.push('/')
 }
 </script>
@@ -393,5 +404,19 @@ async function logout() {
 
 .mobile-me {
   border-top: 1px solid var(--k-border);
+}
+
+/* A tablet (the links are in a row, but the screen is narrow): with five links, the logo text
+   and my name are hidden (the avatar stays) so the bar never runs off the screen. */
+@media (min-width: 768px) and (max-width: 991.98px) {
+  .brand-name,
+  .account-name,
+  .caret {
+    display: none;
+  }
+
+  .link {
+    padding: 6px 8px;
+  }
 }
 </style>

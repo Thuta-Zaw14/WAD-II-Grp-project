@@ -11,6 +11,8 @@ import { useProfileStore } from './stores/profile'
 import { useOffersStore } from './stores/offers'
 import { useBookingsStore } from './stores/bookings'
 import { useReportsStore } from './stores/reports'
+import { useProgressStore } from './stores/progress'
+import { clearMediaCache } from './services/progressMedia'
 import { startIdleWatch, stopIdleWatch } from './services/idleLogout'
 
 const app = createApp(App)
@@ -28,6 +30,8 @@ onAuthStateChanged(auth, (user) => {
     useOffersStore().reset()
     useBookingsStore().reset()
     useReportsStore().reset()
+    useProgressStore().reset()
+    clearMediaCache()
   }
   lastUid = uid
 

@@ -338,6 +338,7 @@ router.get('/:uid/public', verifyToken, async (req, res) => {
         dateAttained: card.dateAttained || '',
         sessionDurationMinutes: card.sessionDurationMinutes || 60, // the length of the one lesson
         completedStageCount: card.completedStageCount || (Array.isArray(card.subskills) ? card.subskills.length : 0),
+        masteryLevel: card.masteryLevel || '', // the instructor's final grade (see models/progress.js)
       }))
       .sort((a, b) => b.dateAttained.localeCompare(a.dateAttained))
 
