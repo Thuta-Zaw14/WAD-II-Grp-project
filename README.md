@@ -1,3 +1,33 @@
+URL of App: https://wad-kongsi.vercel.app
+URL of the public Git repo: https://github.com/Thuta-Zaw14/WAD-II-Grp-project
+
+The easiest way to test is the live app above. Local setup is only needed if you want to run the code yourself.
+## Set up
+Requirements: Node.js 20 or newer, and npm.
+
+1. Clone the repository and switch to the branch:
+   git clone https://github.com/Thuta-Zaw14/WAD-II-Grp-project.git
+   cd WAD-II-Grp-project
+   git switch last-resort
+2. Install the front end: npm install
+3. Create a file called .env in the project root (next to package.json) with:
+VITE_FIREBASE_API_KEY = "AIzaSyDpPJ5F89ReeyLEtil5zdGaJSkXJyxQoEk"
+VITE_FIREBASE_AUTH_DOMAIN = "wadii-project-c1e14.firebaseapp.com"
+VITE_FIREBASE_PROJECT_ID = "wadii-project-c1e14"
+VITE_FIREBASE_STORAGE_BUCKET = "wadii-project-c1e14.firebasestorage.app"
+VITE_FIREBASE_MESSAGING_SENDER_ID = "58717159700"
+VITE_FIREBASE_APP_ID = "1:58717159700:web:e1ce595200c460cd4bc201"
+VITE_API_URL = "http://localhost:3000/api"
+   (Use NAME=value, with no quotes or colons.)
+4.server/firebaseKey.json is in the submission zip
+5. Install the server: cd server, then npm install
+6. Put the Firebase service account key at server/firebaseKey.json.
+
+## Run
+Use two terminals:
+- Terminal 1 (server): cd server, then npm run dev  → API on http://localhost:3000/api
+- Terminal 2 (front end, project root): npm run dev  → open http://localhost:5173
+
 Admin 
  - Admin Function
     1. Login to an admin account in the Login page (account email/password does not have quotations)
