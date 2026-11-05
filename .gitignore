@@ -41,3 +41,8 @@ __screenshots__/
 #env
 .env
 server/firebaseKey.json
+server/*-firebase-adminsdk-*.json
+
+# Local AI assistant instructions
+CLAUDE.md
+*.md

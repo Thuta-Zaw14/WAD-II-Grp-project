@@ -118,7 +118,7 @@ function onKeydown(e) {
 }
 
 .suggestion.is-active {
-  background: #f5f0e1;
-  color: #4a3f2a;
+  background: var(--k-surface-alt);
+  color: var(--k-text);
 }
 </style>

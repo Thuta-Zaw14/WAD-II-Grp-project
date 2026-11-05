@@ -1,0 +1,232 @@
+/* The look of Kongsi in one place. Every page uses these colours and classes, so changing
+   something here changes the whole app. (main.js loads this file right after Bootstrap.) */
+
+:root {
+  /* colours */
+  --k-bg: #faf9f6; /* page background */
+  --k-surface: #fffefa; /* cards */
+  --k-surface-alt: #f3ecdc; /* banners, table headers, soft highlights */
+  --k-border: #eae2d4;
+  --k-text: #44392b;
+  --k-muted: #766b5c;
+  --k-accent: #5c4932; /* dark brown: strong blocks and avatars */
+  --k-accent-hover: #433321;
+  --k-on-accent: #ffffff;
+  --k-brand: #9a6a44; /* tan: the main buttons and links */
+  --k-brand-hover: #80563a;
+  --k-brand-soft: #f1dcc6; /* light tan: my own messages, credit labels */
+  --k-danger: #a12626;
+
+  /* the four genres */
+  --k-cat-sports: #d9822b;
+  --k-cat-creative: #8e5ea2;
+  --k-cat-music: #3b8ea5;
+  --k-cat-tech: #4a7c59;
+
+  /* shape */
+  --k-radius: 16px;
+  --k-shadow: 0 1px 3px rgba(68, 57, 43, 0.08);
+  --k-shadow-lift: 0 10px 28px rgba(68, 57, 43, 0.14);
+
+  /* the heading font is loaded in index.html. Georgia is used if it cannot load. */
+  --k-font-heading: 'Fraunces', Georgia, 'Times New Roman', serif;
+}
+
+/* Bootstrap takes its colours and corners from its own --bs-... variables. Pointing them at
+   the colours above gives Bootstrap's text, borders, links, badges and forms the same look. */
+:root {
+  --bs-body-bg: var(--k-bg);
+  --bs-body-color: var(--k-text);
+  --bs-secondary-color: var(--k-muted); /* .text-muted */
+  --bs-border-color: var(--k-border);
+  --bs-border-radius: 0.625rem;
+  --bs-border-radius-sm: 0.5rem;
+  --bs-border-radius-lg: 0.875rem;
+  --bs-link-color-rgb: 154, 106, 68; /* = --k-brand */
+  --bs-link-hover-color-rgb: 128, 86, 58; /* = --k-brand-hover */
+  --bs-dark-rgb: 68, 57, 43; /* .text-dark and .text-bg-dark */
+  --bs-light-rgb: 243, 236, 220; /* .text-bg-light */
+}
+
+h1, h2, h3, h4, h5, h6,
+.h1, .h2, .h3, .h4, .h5, .h6,
+.font-heading {
+  font-family: var(--k-font-heading);
+  font-weight: 600;
+}
+
+/* ---------- Cards and boxes ---------- */
+
+/* Bootstrap's .card, with softer corners and the warm border */
+.card {
+  --bs-card-bg: var(--k-surface);
+  --bs-card-border-color: var(--k-border);
+  --bs-card-border-radius: var(--k-radius);
+  --bs-card-inner-border-radius: calc(var(--k-radius) - 1px);
+  box-shadow: var(--k-shadow);
+}
+
+/* the same look for a plain box */
+.k-card {
+  background: var(--k-surface);
+  border: 1px solid var(--k-border);
+  border-radius: var(--k-radius);
+  box-shadow: var(--k-shadow);
+}
+
+/* the card the add / edit forms sit in: the same cream and border as the skill cards on Profile
+   (.achievement-card in components/SkillCard.vue) */
+.k-form-card {
+  background: #fffdf8;
+  border-color: #e8dfce;
+}
+
+/* the box at the top of a page: its title and a short line under it */
+.banner {
+  background: var(--k-surface-alt);
+  border: 1px solid var(--k-border);
+  border-radius: var(--k-radius);
+  color: var(--k-text);
+}
+
+/* a card that rises a little when the mouse is over it */
+.k-lift {
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.k-lift:hover {
+  transform: translateY(-3px);
+  box-shadow: var(--k-shadow-lift);
+}
+
+/* a thick top edge in the colour of the card's genre (add the class cat-Music etc. too) */
+.genre-card {
+  border-top: 5px solid var(--cat, var(--k-border));
+}
+
+.cat-Sports { --cat: var(--k-cat-sports); }
+.cat-Creative { --cat: var(--k-cat-creative); }
+.cat-Music { --cat: var(--k-cat-music); }
+.cat-Tech { --cat: var(--k-cat-tech); }
+
+/* small capital label above a heading */
+.eyebrow {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 1.6px;
+  text-transform: uppercase;
+  color: var(--k-muted);
+}
+
+/* ---------- Buttons and links ---------- */
+
+/* The main button. Bootstrap's own buttons work the same way: every state (hover, pressed,
+   disabled) reads its colours from these variables. btn-kongsi is the older name of the
+   same button, still used on the profile page. */
+.btn-brand,
+.btn-kongsi {
+  --bs-btn-color: #fff;
+  --bs-btn-bg: var(--k-brand);
+  --bs-btn-border-color: var(--k-brand);
+  --bs-btn-hover-color: #fff;
+  --bs-btn-hover-bg: var(--k-brand-hover);
+  --bs-btn-hover-border-color: var(--k-brand-hover);
+  --bs-btn-active-color: #fff;
+  --bs-btn-active-bg: var(--k-brand-hover);
+  --bs-btn-active-border-color: var(--k-brand-hover);
+  --bs-btn-disabled-color: #fff;
+  --bs-btn-disabled-bg: var(--k-brand);
+  --bs-btn-disabled-border-color: var(--k-brand);
+  --bs-btn-focus-shadow-rgb: 154, 106, 68;
+  font-weight: 600;
+}
+
+/* a dark button, e.g. the start time you picked */
+.btn-accent {
+  --bs-btn-color: #fff;
+  --bs-btn-bg: var(--k-accent);
+  --bs-btn-border-color: var(--k-accent);
+  --bs-btn-hover-color: #fff;
+  --bs-btn-hover-bg: var(--k-accent-hover);
+  --bs-btn-hover-border-color: var(--k-accent-hover);
+  --bs-btn-active-color: #fff;
+  --bs-btn-active-bg: var(--k-accent-hover);
+  --bs-btn-active-border-color: var(--k-accent-hover);
+  font-weight: 600;
+}
+
+/* a button that looks like a small link, e.g. "Report" under a message */
+.link-button {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--k-brand);
+  text-decoration: underline;
+  font-size: inherit;
+}
+
+.link-button:hover {
+  color: var(--k-brand-hover);
+}
+
+.form-control:focus,
+.form-select:focus {
+  border-color: var(--k-brand);
+  box-shadow: 0 0 0 3px rgba(154, 106, 68, 0.2);
+}
+
+/* ---------- Labels ---------- */
+
+/* "3 credits" */
+.credit-pill {
+  display: inline-block;
+  padding: 3px 12px;
+  border-radius: 999px;
+  background: var(--k-brand-soft);
+  color: #6b4423;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* the state of a booking: add status-upcoming, status-finished, ... */
+.status {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.status-upcoming,
+.status-booked { background: var(--k-brand-soft); color: #6b4423; }
+.status-inProgress { background: var(--k-accent); color: #fff; }
+.status-readyToFinish { background: #fbe7a8; color: #6b5200; }
+.status-finished { background: #dcebdf; color: #2f5d3d; }
+.status-cancelled { background: #e8e4dc; color: #5f584d; }
+.status-disputed { background: #f6d5d5; color: #8a1f1f; }
+
+/* The background of every page: a cool light brown fading into a darker brown, with the logo's
+   two overlapping circles repeated faintly over it. It is fixed behind the whole window, so it
+   stays put while the page scrolls (the nav bar and the cards have their own backgrounds). */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background-color: #ddd0c1;
+  background-image:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='72' height='72' viewBox='0 0 72 72'%3E%3Cg fill='none' stroke='%235c4932' stroke-width='1.5'%3E%3Cg stroke-opacity='0.16'%3E%3Ccircle cx='14' cy='18' r='8'/%3E%3Ccircle cx='23' cy='18' r='8'/%3E%3C/g%3E%3Cg stroke-opacity='0.1'%3E%3Ccircle cx='50' cy='54' r='8'/%3E%3Ccircle cx='59' cy='54' r='8'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E"),
+    linear-gradient(160deg, #e8ded2 0%, #d9c9b6 55%, #b9a088 100%);
+}
+
+/* people who asked their system for less motion get no lifting cards */
+@media (prefers-reduced-motion: reduce) {
+  .k-lift {
+    transition: none;
+  }
+
+  .k-lift:hover {
+    transform: none;
+  }
+}
