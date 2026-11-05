@@ -809,7 +809,7 @@ function resetFilters() {
                 You can cancel for a full refund until {{ formatTime(chosenSlot.cancelBefore) }}.
               </p>
               <p v-else class="small text-danger mb-2">
-                This starts in less than 24 hours, so it can't be cancelled once you book it.
+                This starts in less than 24 hours, so credit won't be refunded if you cancel.
               </p>
               <p v-if="credits < selectedSkill.creditCost" class="small text-danger mb-2">
                 You do not have enough credits. Teach a course to earn some.
