@@ -14,7 +14,7 @@ Admin
     Password: "Wad2SoFun"
 
     Admin Example Account 4 
-    Email: "goo@gmail.com"
+    Email: "gooadmin@gmail.com"
     Password: "iamgoo"
 
     2. After logging in, the backend will verify admin status and the page will be redirected to /admins after a successful authentication and authorisation, it will show all users details (excluding admin)
