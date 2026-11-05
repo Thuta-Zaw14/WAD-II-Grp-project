@@ -97,7 +97,13 @@ const initials = computed(() => {
 
         <div>
           <span class="footer-label">ISSUED BY</span>
-          <p class="footer-value">{{ skill.issuer || 'Unknown issuer' }}</p>
+          <p class="footer-value">
+            <!-- the instructor's name opens their profile (cards know them by teacherUid) -->
+            <RouterLink v-if="skill.teacherUid" :to="'/members/' + skill.teacherUid" class="issuer-link">
+              {{ skill.issuer || 'Instructor' }}
+            </RouterLink>
+            <template v-else>{{ skill.issuer || 'Unknown issuer' }}</template>
+          </p>
         </div>
       </div>
 
@@ -245,6 +251,17 @@ const initials = computed(() => {
   color: #4e4030;
   font-size: 12px;
   font-weight: 600;
+}
+
+.issuer-link {
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.issuer-link:hover,
+.issuer-link:focus-visible {
+  color: var(--k-brand);
 }
 
 .date-info {

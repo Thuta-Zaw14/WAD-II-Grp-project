@@ -171,15 +171,27 @@ export async function getMyBookings() {
   return response.data
 }
 
-export async function submitStageReflection(id, stageIndex, reflection) {
+// the reflections of all the stages at once: one text per stage, in order -> { booking }
+export async function submitReflections(id, reflections) {
   const response = await axios.post(
-    API + '/bookings/' + encodeURIComponent(id) + '/progress/stages/' + stageIndex + '/reflection',
-    { reflection },
+    API + '/bookings/' + encodeURIComponent(id) + '/reflections',
+    { reflections },
     await authConfig()
   )
   return response.data
 }
 
+// the teacher sends one reflection back to be rewritten, with an optional note -> { booking }
+export async function rejectBookingStage(id, stageIndex, note) {
+  const response = await axios.post(
+    API + '/bookings/' + encodeURIComponent(id) + '/progress/stages/' + stageIndex + '/reject',
+    { note },
+    await authConfig()
+  )
+  return response.data
+}
+
+// the teacher accepts one reflection -> { booking, finished } (finished: that was the last one)
 export async function approveBookingStage(id, stageIndex) {
   const response = await axios.post(
     API + '/bookings/' + encodeURIComponent(id) + '/progress/stages/' + stageIndex + '/approve',
@@ -196,6 +208,18 @@ export async function cancelBooking(id) {
 }
 
 // the student moves their booking to another start time of the same course -> { booking, offer }
+// The teacher cancelled my start time: put the same booking on another one ({ booking, offer })
+export async function rebookBooking(id, slotId) {
+  const response = await axios.post(API + '/bookings/' + encodeURIComponent(id) + '/rebook', { slotId: slotId }, await authConfig())
+  return response.data
+}
+
+// ...or drop the course instead (I was already refunded) ({ booking })
+export async function dropBooking(id) {
+  const response = await axios.post(API + '/bookings/' + encodeURIComponent(id) + '/drop', {}, await authConfig())
+  return response.data
+}
+
 export async function moveBooking(id, slotId) {
   const response = await axios.post(API + '/bookings/' + encodeURIComponent(id) + '/move', { slotId: slotId }, await authConfig())
   return response.data

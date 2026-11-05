@@ -78,6 +78,23 @@ export function roleOf(booking, uid) {
   return ''
 }
 
+// Free cancellation is over (see freeCancelUntil) but the class is still on: the student may still
+// DROP it, and then the held credits go to the teacher (dropCourse in bookings.js). Allowed until
+// the lesson is over.
+export function canDropLate(booking, now) {
+  if (booking.status !== 'booked') return false
+  const cancelUntil = freeCancelUntil(booking)
+  if (cancelUntil !== null && now < cancelUntil) return false // a free cancel is still possible
+  return now < new Date(booking.finishAfter)
+}
+
+// The teacher cancelled this student's start time (the student was refunded) and the student has
+// not yet picked a new time (rebookAfterCancel) or dropped the course (dropCourse).
+// Until then the chat stays open, so they can ask the teacher for another time.
+export function awaitingNewTime(booking) {
+  return booking.status === 'cancelled' && booking.startTimeCancelled === true && booking.learnerDropped !== true
+}
+
 // Where a booking is in its life. status is what is saved ('booked', 'finished',
 // 'cancelled', 'disputed'); a 'booked' one is split into three by the clock:
 //   upcoming       - the course has not started

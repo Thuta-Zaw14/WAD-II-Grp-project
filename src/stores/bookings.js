@@ -2,7 +2,8 @@ import { ref, computed } from 'vue'
 import { defineStore } from 'pinia'
 import {
   getMyBookings, bookSlot, cancelBooking, confirmBooking, reportBooking, removeStudent, markSeenByTeacher,
-  markSeenByLearner, submitStageReflection, approveBookingStage, moveBooking, dismissBookingNotice, errorText,
+  markSeenByLearner, submitReflections, approveBookingStage, rejectBookingStage, moveBooking, dismissBookingNotice,
+  rebookBooking, dropBooking, errorText,
 } from '../services/api'
 import { learnerActionCount, studentActionCount } from '../services/attention'
 import { useOffersStore } from './offers'
@@ -37,7 +38,12 @@ export const useBookingsStore = defineStore('bookings', () => {
   // approved stages and notices. Classes I host: reflections to approve, unread messages, new
   // students and notices. Together they are the number on "My Classes" in the nav bar.
   const learningAlertCount = computed(
-    () => learning.value.reduce((total, b) => total + learnerActionCount(b) + (b.notice ? 1 : 0), 0)
+    () =>
+      learning.value.reduce(
+        // a dropped or cancelled class is no longer listed, so only its notice still counts
+        (total, b) => total + (b.status !== 'cancelled' || b.awaitingNewTime ? learnerActionCount(b) : 0) + (b.notice ? 1 : 0),
+        0
+      )
   )
   const teachingAlertCount = computed(
     () => teaching.value.reduce((total, b) => total + studentActionCount(b) + (b.notice ? 1 : 0), 0)
@@ -143,6 +149,49 @@ export const useBookingsStore = defineStore('bookings', () => {
     }
   }
 
+  // The teacher cancelled my start time (I was refunded): book another start time of the same
+  // course, on the same booking (the chat stays). Returns true / false like book().
+  async function rebook(id, slotId) {
+    busyId.value = id
+    actionError.value = ''
+    try {
+      const data = await rebookBooking(id, slotId)
+      replaceBooking(data.booking)
+      if (data.offer) useOffersStore().replaceOffer(data.offer) // one more seat taken
+      await useProfileStore().fetchProfile() // the credits are held again
+      useToastStore().show('You are booked on the new time.')
+      busyId.value = ''
+      return true
+    } catch (err) {
+      actionError.value = errorText(err)
+      busyId.value = ''
+      return false
+    }
+  }
+
+  // Drop a course: after the teacher cancelled my start time (no credits move, the refund already
+  // happened), or once free cancellation is over (the held credits go to the teacher: data.penalty).
+  async function drop(id) {
+    busyId.value = id
+    actionError.value = ''
+    try {
+      const data = await dropBooking(id)
+      replaceBooking(data.booking)
+      if (data.offer) useOffersStore().replaceOffer(data.offer) // the seat is free again
+      useToastStore().show(
+        data.penalty
+          ? 'Course dropped. Your ' + data.penalty + ' credit' + (data.penalty === 1 ? '' : 's') + ' went to ' + data.booking.teacherName + '.'
+          : 'Course dropped. Your credits were already refunded.'
+      )
+      busyId.value = ''
+      return true
+    } catch (err) {
+      actionError.value = errorText(err)
+      busyId.value = ''
+      return false
+    }
+  }
+
   // Say the course is finished. When the other person has said so too, the teacher is paid.
   async function confirm(id) {
     busyId.value = id
@@ -199,11 +248,12 @@ export const useBookingsStore = defineStore('bookings', () => {
     }
   }
 
-  async function submitReflection(id, stageIndex, reflection) {
+  // the student sends the reflections of all the stages (one text per stage, in order)
+  async function sendReflections(id, reflections) {
     busyId.value = id
     actionError.value = ''
     try {
-      const data = await submitStageReflection(id, stageIndex, reflection)
+      const data = await submitReflections(id, reflections)
       replaceBooking(data.booking)
       busyId.value = ''
       return true
@@ -220,7 +270,29 @@ export const useBookingsStore = defineStore('bookings', () => {
     try {
       const data = await approveBookingStage(id, stageIndex)
       replaceBooking(data.booking)
-      useToastStore().show('Stage approved.')
+      if (data.finished) {
+        await useProfileStore().fetchProfile() // the held credits just came to me
+        useToastStore().show('Every reflection is accepted: the course is finished. You earned the credits.')
+      } else {
+        useToastStore().show('Reflection accepted.')
+      }
+      busyId.value = ''
+      return true
+    } catch (err) {
+      actionError.value = errorText(err)
+      busyId.value = ''
+      return false
+    }
+  }
+
+  // the teacher sends one reflection back, with an optional note. Returns true / false.
+  async function rejectStage(id, stageIndex, note) {
+    busyId.value = id
+    actionError.value = ''
+    try {
+      const data = await rejectBookingStage(id, stageIndex, note)
+      replaceBooking(data.booking)
+      useToastStore().show('Reflection sent back. The student will be asked to rewrite it.')
       busyId.value = ''
       return true
     } catch (err) {
@@ -279,7 +351,7 @@ export const useBookingsStore = defineStore('bookings', () => {
     bookings, loading, error, actionError, busyId, booking,
     learning, teaching, heldCredits, notices,
     learningAlertCount, teachingAlertCount, attentionCount,
-    fetchBookings, refreshBookings, book, cancel, move, confirm, report, remove, reset,
-    submitReflection, approveStage, dismissNotice, markStudentsSeen, markApprovalsSeen,
+    fetchBookings, refreshBookings, book, cancel, move, rebook, drop, confirm, report, remove, reset,
+    sendReflections, approveStage, rejectStage, dismissNotice, markStudentsSeen, markApprovalsSeen,
   }
 })

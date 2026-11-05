@@ -273,8 +273,24 @@ router.get('/me/skill-cards', verifyToken, async (req, res) => {
     return res.status(500).json({ error: 'Could not load your skill cards.' })
   }
 
-  res.json(result.docs)
+  res.json(await withTeacherIds(result.docs))
 })
+
+// Cards made before skill cards stored teacherUid: look the teacher up from the card's course
+// (one read per course, not per card). A course that was deleted leaves teacherUid ''.
+async function withTeacherIds(cards) {
+  const missing = [...new Set(cards.filter((card) => !card.teacherUid && card.offerId).map((card) => card.offerId))]
+  const teacherOf = {}
+  for (const offerId of missing) {
+    try {
+      const offer = await db.collection('offers').doc(offerId).get()
+      teacherOf[offerId] = offer.exists ? offer.data().teacherUid || '' : ''
+    } catch (err) {
+      teacherOf[offerId] = ''
+    }
+  }
+  return cards.map((card) => ({ ...card, teacherUid: card.teacherUid || teacherOf[card.offerId] || '' }))
+}
 
 router.get('/:uid/public', verifyToken, async (req, res) => {
   const uid = req.params.uid
@@ -286,17 +302,34 @@ router.get('/:uid/public', verifyToken, async (req, res) => {
       return res.status(404).json({ error: 'Profile not found.' })
     }
 
-    const [cardsResult, bookingsResult] = await Promise.all([
+    const [cardsResult, bookingsResult, offersResult] = await Promise.all([
       findDocsWhereEquals('skillCards', 'learnerUid', uid),
       findDocsWhereEquals('bookings', 'learnerUid', uid),
+      findDocsWhereEquals('offers', 'teacherUid', uid),
     ])
-    if (!cardsResult.status || !bookingsResult.status) {
+    if (!cardsResult.status || !bookingsResult.status || !offersResult.status) {
       return res.status(500).json({ error: 'Could not load this profile.' })
     }
 
     const profile = snapshot.data()
-    const completedCourses = cardsResult.docs
+    // the courses this member teaches (only what the Courses page shows anyway)
+    const courses = offersResult.docs
+      .map((offer) => ({
+        id: offer.id,
+        title: offer.title || offer.skill || 'Course',
+        skill: offer.skill || '',
+        category: offer.category || '',
+        mode: offer.mode || '',
+        region: offer.region || '',
+        place: offer.place || '',
+        creditCost: offer.creditCost || 0,
+      }))
+      .sort((a, b) => a.title.localeCompare(b.title))
+    const cards = await withTeacherIds(cardsResult.docs)
+    const completedCourses = cards
       .map((card) => ({
+        id: card.id,
+        teacherUid: card.teacherUid || '',
         name: card.name || card.title || '',
         courseTitle: card.courseTitle || card.name || card.title || '',
         category: card.category || '',
@@ -320,17 +353,17 @@ router.get('/:uid/public', verifyToken, async (req, res) => {
         const completedStages = allStageNames
           .map((_, index) => stageProgress[index]?.approved === true ? index : -1)
           .filter((index) => index >= 0)
-        const firstIncomplete = allStageNames.findIndex((_, index) => stageProgress[index]?.approved !== true)
-        const visibleStageCount = firstIncomplete === -1 ? allStageNames.length : firstIncomplete + 1
+        // a course is one lesson, so every stage is open at once
         return {
           bookingId: booking.id,
           title: booking.title || booking.skill || 'Course',
           category: booking.category || '',
           totalStageCount: allStageNames.length,
-          stageNames: allStageNames.slice(0, visibleStageCount),
-          stageStatuses: allStageNames.slice(0, visibleStageCount).map((_, index) => {
+          stageNames: allStageNames,
+          stageStatuses: allStageNames.map((_, index) => {
             const stage = stageProgress[index] || {}
             if (stage.approved === true) return 'approved'
+            if (stage.rejected === true) return 'rejected'
             return stage.reflection ? 'pending' : 'not_started'
           }),
           completedStages: completedStages,
@@ -340,8 +373,10 @@ router.get('/:uid/public', verifyToken, async (req, res) => {
     res.json({
       id: snapshot.id,
       name: profile.name || '',
+      photo: profile.photo || '',
       bio: profile.bio || '',
       region: profile.showRegion === false ? '' : profile.region || '',
+      courses: courses,
       skillsTeach: Array.isArray(profile.skillsTeach) ? profile.skillsTeach : [],
       skillsLearn: Array.isArray(profile.skillsLearn) ? profile.skillsLearn : [],
       completedCourses: completedCourses,

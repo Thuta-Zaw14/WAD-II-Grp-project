@@ -2,7 +2,7 @@
 // The documents in Firestore hold things other people should not get (for example
 // the uids of everyone who booked a slot), so every route sends these cut-down copies.
 import {
-  slotMoment, cancelDeadline, phaseOf, roleOf, moveDeadline, freeCancelUntil, MAX_MOVES,
+  slotMoment, cancelDeadline, phaseOf, roleOf, moveDeadline, freeCancelUntil, MAX_MOVES, awaitingNewTime, canDropLate,
 } from './bookingRules.js'
 
 // A slot in Firestore holds the uids of the students who booked it (bookedBy).
@@ -42,19 +42,25 @@ export function publicOffer(offer, uid) {
   for (const slot of offer.slots || []) {
     slots.push(publicSlot(slot, uid))
   }
-  // the teacher's uid stays on the server: the browser only needs to know whether the course is mine
+  // teacherId: the teacher's member id, for the link to their profile (/members/:uid)
   const { teacherUid, ...rest } = offer
-  return { ...rest, title: offer.title || offer.skill, isMine: teacherUid === uid, slots: slots }
+  return { ...rest, title: offer.title || offer.skill, teacherId: teacherUid || '', isMine: teacherUid === uid, slots: slots }
 }
 
 // The notice this person has not dismissed yet (shown on Home and My Classes), or null.
-//   teacher: 'cancelled' (the student cancelled) or 'moved' (the student moved to another time)
-//   student: 'teacherMoved' or 'teacherCancelled' (the teacher moved or cancelled the start time)
+//   teacher: 'cancelled' (the student cancelled), 'dropped' (the student dropped late: the teacher
+//            got the credits) or 'moved' (the student moved to another time)
+//   student: 'teacherMoved' or 'teacherCancelled' (the teacher moved or cancelled the start time),
+//            or 'removed' (the teacher removed them from the class)
 function noticeOf(booking, role) {
   if (role === 'teacher' && booking.teacherNoticeSeen === false) {
     // cancellations saved before notices had a type are 'cancelled'
     const type = booking.teacherNotice || (booking.status === 'cancelled' ? 'cancelled' : '')
     if (type === 'cancelled') {
+      return { type: type, at: booking.teacherNoticeAt || booking.cancelledAt || '' }
+    }
+    if (type === 'dropped') {
+      // the student dropped after free cancellation ended: the held credits came to the teacher
       return { type: type, at: booking.teacherNoticeAt || booking.cancelledAt || '' }
     }
     if (type === 'moved') {
@@ -73,6 +79,10 @@ function noticeOf(booking, role) {
     }
     if (booking.learnerNotice === 'teacherCancelled') {
       return { type: 'teacherCancelled', note: booking.learnerNoticeNote || '', at: booking.learnerNoticeAt || '' }
+    }
+    if (booking.learnerNotice === 'removed') {
+      // the teacher removed (kicked) the student from the class; they were refunded
+      return { type: 'removed', note: booking.learnerNoticeNote || '', at: booking.learnerNoticeAt || '' }
     }
   }
   return null
@@ -101,15 +111,18 @@ export function publicBooking(booking, uid, now = new Date()) {
       submittedAt: saved.submittedAt || '',
       approved: saved.approved === true,
       approvedAt: saved.approvedAt || '',
+      rejected: saved.rejected === true, // the teacher sent it back: the student must rewrite it
+      rejectedAt: saved.rejectedAt || '',
+      rejectNote: typeof saved.rejectNote === 'string' ? saved.rejectNote : '',
     }
   })
   // cancelling (always for a full refund) and moving to another start time: see bookingRules.js
   const cancelUntil = freeCancelUntil(booking) // null: it can no longer be cancelled at all
   const studentMoves = booking.studentMoves || 0
   const firstIncomplete = allStageProgress.findIndex((stage) => !stage.approved)
-  const visibleStageCount = firstIncomplete === -1 ? allStageNames.length : firstIncomplete + 1
-  const stageNames = allStageNames.slice(0, visibleStageCount)
-  const stageProgress = allStageProgress.slice(0, visibleStageCount)
+  // a course is one lesson, so every stage is open at once (the reflections are written together)
+  const stageNames = allStageNames
+  const stageProgress = allStageProgress
 
   return {
     id: booking.id,
@@ -153,13 +166,25 @@ export function publicBooking(booking, uid, now = new Date()) {
     teacherMoved: booking.teacherMoved === true,
     refunded: booking.refunded !== false, // false only for an old late cancellation that paid the teacher
     cancelledAt: booking.cancelledAt || '',
+    finishedAt: booking.finishedAt || '', // when the last reflection was accepted (or both confirmed)
     startTimeCancelled: booking.startTimeCancelled === true, // the teacher cancelled the whole start time
+    // ...and the student has not yet picked a new time or dropped the course (see bookingRules.js)
+    awaitingNewTime: learnerSide && awaitingNewTime(booking),
+    learnerDropped: booking.learnerDropped === true,
+    // "Drop course": after the teacher cancelled the start time (free), or once free cancellation
+    // is over (the held credits go to the teacher: dropPenalty)
+    canDrop: learnerSide && (awaitingNewTime(booking) || canDropLate(booking, now)),
+    dropPenalty: learnerSide && canDropLate(booking, now) ? booking.creditCost : 0,
     notice: noticeOf(booking, role), // something this person has not pressed "Got it" on yet
     // a student who joined since the teacher last opened the course's Students list (bookings from now on)
     newStudent: role === 'teacher' && booking.status === 'booked' && booking.teacherSeenJoin === false,
     // stages the teacher approved since the student last opened the class's Details
     newApprovals: learnerSide ? booking.learnerUnseenApprovals || 0 : 0,
-    canConfirm: booking.status === 'booked' && phase === 'readyToFinish' && myConfirmed !== true,
+    // the student writes (or rewrites) reflections once the lesson has started, until all are accepted
+    canReflect: learnerSide && booking.status === 'booked' && phase !== 'upcoming' && firstIncomplete !== -1,
+    // a course finishes when its last reflection is accepted; "Mark as finished" is only left for
+    // old bookings without stages
+    canConfirm: booking.status === 'booked' && allStageNames.length === 0 && phase === 'readyToFinish' && myConfirmed !== true,
     canReport: booking.status === 'booked' && now >= startsAt,
     reportedByMe: reportedByMe,
     reportReason: reportedByMe ? booking.reportReason || '' : '', // only the person who reported sees it
@@ -170,7 +195,8 @@ export function publicBooking(booking, uid, now = new Date()) {
     createdAt: booking.createdAt,
     // the private chat of this booking (see models/chat.js)
     messageCount: messageCount,
-    chatOpen: booking.status === 'booked' || booking.status === 'disputed', // can new messages still be written?
+    // can new messages still be written? (the same rule as chatIsOpen in chat.js)
+    chatOpen: ['booked', 'disputed', 'finished'].includes(booking.status) || awaitingNewTime(booking),
     unreadChat: role !== '' && messageCount > myReadN && booking.lastMessageBy !== uid, // something new from the other person
     // how many of those I have not opened yet (writing a message also marks everything before it read)
     unreadCount: role !== '' ? Math.max(0, messageCount - myReadN) : 0,

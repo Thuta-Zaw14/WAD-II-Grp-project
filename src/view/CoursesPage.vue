@@ -8,6 +8,7 @@ import { auth } from '../firebase'
 import { useOffersStore } from '../stores/offers'
 import { useProfileStore } from '../stores/profile'
 import { useBookingsStore } from '../stores/bookings'
+import CancelNotices from '../components/CancelNotices.vue'
 import SkillSearch from '../components/SkillSearch.vue'
 import NavBar from '../components/NavBar.vue'
 import UserAvatar from '../components/UserAvatar.vue'
@@ -440,6 +441,9 @@ function resetFilters() {
   <NavBar />
 
   <div class="container py-4">
+    <!-- "X removed you from Y": stays at the top until the student presses "Ok" -->
+    <CancelNotices :only="['removed']" />
+
     <!-- e.g. "Your account has been suspended." for a banned person -->
     <div v-if="profileStore.error" class="alert alert-danger">{{ profileStore.error }}</div>
 
@@ -571,7 +575,11 @@ function resetFilters() {
               <h2 class="h5 mb-2">{{ s.title }}</h2>
               <div class="d-flex align-items-center gap-2 mb-2">
                 <UserAvatar :name="s.teacherName" />
-                <span class="text-muted">Taught by {{ s.teacherName }}</span>
+                <span class="text-muted">
+                  Taught by
+                  <RouterLink v-if="s.teacherId" :to="'/members/' + s.teacherId" class="teacher-link">{{ s.teacherName }}</RouterLink>
+                  <template v-else>{{ s.teacherName }}</template>
+                </span>
               </div>
               <p v-if="s.mode === 'online'" class="text-muted small mb-2">💻 Online class</p>
               <p v-else class="text-muted small mb-2">📍 Meets at {{ s.place }} ({{ s.region }})</p>
@@ -703,7 +711,10 @@ function resetFilters() {
             <div class="min-w-0">
               <strong class="d-block">{{ s.title }}</strong>
               <small class="text-muted">
-                Taught by {{ s.teacherName }} &middot; {{ s.creditCost }} credit{{ s.creditCost === 1 ? '' : 's' }}
+                Taught by
+                <RouterLink v-if="s.teacherId" :to="'/members/' + s.teacherId" class="teacher-link">{{ s.teacherName }}</RouterLink>
+                <template v-else>{{ s.teacherName }}</template>
+                &middot; {{ s.creditCost }} credit{{ s.creditCost === 1 ? '' : 's' }}
               </small>
             </div>
             <div class="d-flex gap-2">
@@ -731,7 +742,11 @@ function resetFilters() {
         <div class="modal-header modal-banner">
           <div>
             <h2 class="h5 mb-0">{{ selectedSkill.title }}</h2>
-            <small>Coach: {{ selectedSkill.teacherName }}</small>
+            <small>
+              Coach:
+              <RouterLink v-if="selectedSkill.teacherId" :to="'/members/' + selectedSkill.teacherId" class="teacher-link">{{ selectedSkill.teacherName }}</RouterLink>
+              <template v-else>{{ selectedSkill.teacherName }}</template>
+            </small>
           </div>
           <button class="btn-close" @click="closeBooking"></button>
         </div>
@@ -1009,5 +1024,18 @@ function resetFilters() {
   max-height: 200px;
   opacity: 1;
   margin-top: 6px;
+}
+
+/* the instructor's name: opens their profile */
+.teacher-link {
+  color: var(--k-accent);
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.teacher-link:hover,
+.teacher-link:focus-visible {
+  color: var(--k-brand);
 }
 </style>

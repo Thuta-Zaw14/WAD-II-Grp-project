@@ -19,7 +19,7 @@ const maxLength = 500
 const checkEverySeconds = 5
 
 const messages = ref([])
-const open = ref(true) // false when the booking is finished or cancelled: read only
+const open = ref(true) // false when the booking was cancelled: read only (a finished course stays open)
 const loading = ref(true)
 const text = ref('')
 const sending = ref(false)
@@ -163,7 +163,7 @@ onUnmounted(stopChecking)
       </div>
     </form>
     <p v-else-if="!blocked" class="small text-muted border-top p-3 mb-0">
-      This booking is over, so the chat is closed. You can still read it.
+      This booking was cancelled, so the chat is closed. You can still read it.
     </p>
   </div>
 </template>
