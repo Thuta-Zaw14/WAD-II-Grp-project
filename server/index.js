@@ -15,7 +15,17 @@ import placeRoutes from './routes/places.js'
 
 const app = express()
 
-app.use(cors({ origin: 'http://localhost:5173' }))
+// Which web pages may call this API. On your own computer that is the Vite page. On the hosting
+// site set FRONTEND_URL to the address of the front end (several addresses: separate with commas).
+const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173'
+const allowedOrigins = frontendUrl.split(',').map((address) => address.trim())
+app.use(cors({ origin: allowedOrigins }))
+
+// Behind Vercel every request arrives through its proxy. Without this, req.ip would be the proxy's
+// address for everybody and the limit below would be shared by all users.
+if (process.env.VERCEL) {
+  app.set('trust proxy', 1)
+}
 
 app.use(express.json())
 
@@ -59,8 +69,12 @@ app.use((err, req, res, next) => {
   res.status(status).json({ error: status < 500 ? 'Bad request.' : 'Something went wrong. Please try again.' })
 })
 
-const port = process.env.PORT || 3000
+// Vercel runs the exported app itself, so it must not also open its own port there.
+if (!process.env.VERCEL) {
+  const port = process.env.PORT || 3000
+  app.listen(port, () => {
+    console.log('Server running on http://localhost:' + port)
+  })
+}
 
-app.listen(port, () => {
-  console.log('Server running on http://localhost:' + port)
-})
+export default app
