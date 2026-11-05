@@ -19,7 +19,7 @@
 // people writing at the same moment get two different numbers n.
 import { db } from '../config/firebaseAdmin.js'
 import { findDocsWhereEquals } from './dbQuery.js'
-import { roleOf } from './bookingRules.js'
+import { roleOf, awaitingNewTime } from './bookingRules.js'
 
 export const MAX_MESSAGE_LENGTH = 500
 export const MAX_MESSAGES = 300 // per booking, so a chat can never grow without limit
@@ -29,9 +29,11 @@ function fail(status, message) {
   return { status: status, error: message }
 }
 
-// can new messages still be added to this booking's chat?
+// can new messages still be added to this booking's chat? While the class is on; while the teacher
+// cancelled the start time and the student is deciding (they may want to ask for another time); and
+// after the course is finished, so a teacher and their past student can stay in touch.
 export function chatIsOpen(booking) {
-  return booking.status === 'booked' || booking.status === 'disputed'
+  return booking.status === 'booked' || booking.status === 'disputed' || booking.status === 'finished' || awaitingNewTime(booking)
 }
 
 // ---------- Send ----------

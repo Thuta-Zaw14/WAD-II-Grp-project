@@ -82,10 +82,6 @@ async function removeSkill(item, skill) {
   <NavBar />
   <main class="profile-page">
     <div class="container py-4 py-md-5">
-      <a href="#" class="back-link text-decoration-none small" @click.prevent="router.push('/home')">
-        &larr; Back to home
-      </a>
-
       <LoadingText v-if="store.loading" class="mt-4" text="Loading your profile..." />
 
       <div
@@ -286,10 +282,6 @@ async function removeSkill(item, skill) {
 /* The colours, and the classes k-card, btn-kongsi and eyebrow, come from src/assets/theme.css */
 .profile-page {
   color: var(--k-text);
-}
-
-.back-link {
-  color: var(--k-muted);
 }
 
 .k-hero {

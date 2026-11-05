@@ -6,6 +6,7 @@ import { getMyReports, createReport, markReportSeen, searchReportTargets, errorT
 import { useToastStore } from '../stores/toast'
 import { useReportsStore } from '../stores/reports'
 import NavBar from '../components/NavBar.vue'
+import BackButton from '../components/BackButton.vue'
 import LoadingText from '../components/LoadingText.vue'
 import EmptyState from '../components/EmptyState.vue'
 
@@ -294,9 +295,7 @@ async function submit() {
   <main class="container py-4 reports-page">
     <!-- ========== File a new report ========== -->
     <template v-if="creating">
-      <a href="#" class="back-link small text-decoration-none" @click.prevent="router.push('/reports')">
-        &lsaquo; Back to Reports
-      </a>
+      <BackButton fallback="/reports" />
 
       <section class="k-card form-card p-4 p-md-5 mt-3">
         <p class="eyebrow mb-1">TELL US WHAT HAPPENED</p>
@@ -492,10 +491,6 @@ async function submit() {
 .reports-page {
   max-width: 860px;
   color: var(--k-text);
-}
-
-.back-link {
-  color: var(--k-muted);
 }
 
 .form-card {

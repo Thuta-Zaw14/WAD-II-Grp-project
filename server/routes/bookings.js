@@ -3,10 +3,11 @@ import { verifyToken } from '../middleware/verifyToken.js'
 import { findDocsWhereEquals } from '../models/dbQuery.js'
 import {
   cancelBooking, confirmBooking, reportBooking, removeStudent, markSeenByTeacher, markSeenByLearner,
-  submitStageReflection, approveBookingStage, moveBooking, dismissNotice,
+  submitReflections, approveBookingStage, rejectBookingStage, moveBooking, dismissNotice, rebookAfterCancel, dropCourse,
 } from '../models/bookings.js'
 import { publicBooking, publicOffer, publicMessage, publicChatInfo } from '../models/publicView.js'
 import { sendMessage, readMessages, chatIsOpen, MAX_MESSAGE_LENGTH } from '../models/chat.js'
+import { awaitingNewTime } from '../models/bookingRules.js'
 import { isValidId } from '../models/discussions.js'
 
 // Making a booking is POST /api/offers/:id/slots/:slotId/book (in routes/offers.js).
@@ -31,12 +32,13 @@ router.get('/mine', verifyToken, async (req, res) => {
     return res.status(500).json({ error: 'Could not load your sessions.' })
   }
 
-  // Bookings that still need attention come first, soonest first. Finished and
+  // Bookings that still need attention come first, soonest first (a class whose start time the
+  // teacher cancelled counts too while the student is picking a new one). Finished and
   // cancelled ones go below, most recent first.
   const all = [...asLearner.docs, ...asTeacher.docs]
   all.sort((a, b) => {
-    const aOpen = a.status === 'booked' || a.status === 'disputed'
-    const bOpen = b.status === 'booked' || b.status === 'disputed'
+    const aOpen = a.status === 'booked' || a.status === 'disputed' || (a.learnerUid === uid && awaitingNewTime(a))
+    const bOpen = b.status === 'booked' || b.status === 'disputed' || (b.learnerUid === uid && awaitingNewTime(b))
     if (aOpen !== bOpen) return aOpen ? -1 : 1
     if (aOpen) return a.startsAt < b.startsAt ? -1 : 1
     return a.startsAt < b.startsAt ? 1 : -1
@@ -50,24 +52,35 @@ router.get('/mine', verifyToken, async (req, res) => {
   res.json(list)
 })
 
-router.post('/:id/progress/stages/:stageIndex/reflection', verifyToken, async (req, res) => {
+// The student sends the reflections of all the stages at once. body = { reflections: [text, ...] }
+router.post('/:id/reflections', verifyToken, async (req, res) => {
   try {
-    const result = await submitStageReflection(
-      req.user.uid,
-      req.params.id,
-      Number(req.params.stageIndex),
-      req.body.reflection
-    )
+    const result = await submitReflections(req.user.uid, req.params.id, req.body.reflections)
     if (result.error) {
       return res.status(result.status).json({ error: result.error })
     }
     res.json({ booking: publicBooking(result.booking, req.user.uid) })
   } catch (err) {
-    console.log('submitStageReflection failed:', err.message)
-    res.status(500).json({ error: 'Could not submit the stage reflection.' })
+    console.log('submitReflections failed:', err.message)
+    res.status(500).json({ error: 'Could not send the reflections.' })
   }
 })
 
+// The teacher sends one reflection back to be rewritten. body = { note } (optional)
+router.post('/:id/progress/stages/:stageIndex/reject', verifyToken, async (req, res) => {
+  try {
+    const result = await rejectBookingStage(req.user.uid, req.params.id, Number(req.params.stageIndex), req.body.note)
+    if (result.error) {
+      return res.status(result.status).json({ error: result.error })
+    }
+    res.json({ booking: publicBooking(result.booking, req.user.uid) })
+  } catch (err) {
+    console.log('rejectBookingStage failed:', err.message)
+    res.status(500).json({ error: 'Could not send the reflection back.' })
+  }
+})
+
+// The teacher accepts one reflection (the last one finishes the course: finished = true)
 router.post('/:id/progress/stages/:stageIndex/approve', verifyToken, async (req, res) => {
   try {
     const result = await approveBookingStage(
@@ -78,7 +91,7 @@ router.post('/:id/progress/stages/:stageIndex/approve', verifyToken, async (req,
     if (result.error) {
       return res.status(result.status).json({ error: result.error })
     }
-    res.json({ booking: publicBooking(result.booking, req.user.uid) })
+    res.json({ booking: publicBooking(result.booking, req.user.uid), finished: result.finished === true })
   } catch (err) {
     console.log('approveBookingStage failed:', err.message)
     res.status(500).json({ error: 'Could not approve the course stage.' })
@@ -102,6 +115,45 @@ router.post('/:id/move', verifyToken, async (req, res) => {
   } catch (err) {
     console.log('moveBooking failed:', err.message)
     res.status(500).json({ error: 'Could not move the booking. Please try again.' })
+  }
+})
+
+// The teacher cancelled my start time: put the same booking on another start time. body = { slotId }
+router.post('/:id/rebook', verifyToken, async (req, res) => {
+  if (typeof req.body.slotId !== 'string' || req.body.slotId === '') {
+    return res.status(400).json({ error: 'Pick a start time.' })
+  }
+  try {
+    const result = await rebookAfterCancel(req.user.uid, req.params.id, req.body.slotId)
+    if (result.error) {
+      return res.status(result.status).json({ error: result.error })
+    }
+    res.json({
+      booking: publicBooking(result.booking, req.user.uid),
+      offer: publicOffer(result.offer, req.user.uid),
+    })
+  } catch (err) {
+    console.log('rebookAfterCancel failed:', err.message)
+    res.status(500).json({ error: 'Could not book the new time. Please try again.' })
+  }
+})
+
+// Drop the course: after the teacher cancelled my start time (already refunded, nothing to pay), or
+// once free cancellation is over (the held credits go to the teacher). See dropCourse.
+router.post('/:id/drop', verifyToken, async (req, res) => {
+  try {
+    const result = await dropCourse(req.user.uid, req.params.id)
+    if (result.error) {
+      return res.status(result.status).json({ error: result.error })
+    }
+    res.json({
+      booking: publicBooking(result.booking, req.user.uid),
+      offer: result.offer ? publicOffer(result.offer, req.user.uid) : null,
+      penalty: result.penalty,
+    })
+  } catch (err) {
+    console.log('dropCourse failed:', err.message)
+    res.status(500).json({ error: 'Could not drop the course. Please try again.' })
   }
 })
 

@@ -4,7 +4,6 @@ import LandingPage from '../view/LandingPage.vue'
 import HomePage from '../view/HomePage.vue'
 import CoursesPage from '../view/CoursesPage.vue'
 import MyClassesPage from '../view/MyClassesPage.vue'
-import SessionProgressPage from '../view/SessionProgressPage.vue'
 import ChatPage from '../view/ChatPage.vue'
 import DiscussionPage from '../view/DiscussionPage.vue'
 import InsightsPage from '@/view/Insightspage.vue'
@@ -30,7 +29,7 @@ const router = createRouter({
     { path: '/courses', component: CoursesPage },
     { path: '/classes', component: MyClassesPage },
     { path: '/sessions', redirect: '/classes' }, // the old name of My classes
-    { path: '/sessions/:id/progress', component: SessionProgressPage, props: true },
+    { path: '/sessions/:id/progress', redirect: '/classes' }, // reflections are on My Classes now
     { path: '/chat/:id', component: ChatPage, props: true }, // the private chat of one booking
     { path: '/discussion/:id', component: DiscussionPage, props: true }, // the public discussion of one course
     { path: '/insights', component: InsightsPage },

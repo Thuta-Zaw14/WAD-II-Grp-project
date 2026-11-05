@@ -8,7 +8,7 @@ import { useOffersStore } from '../stores/offers'
 import { useToastStore } from '../stores/toast'
 import NavBar from '../components/NavBar.vue'
 import CancelNotices from '../components/CancelNotices.vue'
-import { unreadOf, reflectionsWaiting, studentActionCount } from '../services/attention'
+import { unreadOf, reflectionsWaiting, reflectionsRejected, studentActionCount } from '../services/attention'
 import LoadingText from '../components/LoadingText.vue'
 import EmptyState from '../components/EmptyState.vue'
 import ClassModal from '../components/ClassModal.vue'
@@ -92,23 +92,26 @@ function findBooking(id) {
 const phaseLabels = {
   upcoming: 'Upcoming',
   inProgress: 'In progress',
-  readyToFinish: 'Ready to finish',
+  readyToFinish: 'Lesson done',
   finished: 'Finished',
   cancelled: 'Cancelled',
   disputed: 'Under review',
 }
 
-// What a stage looks like right now: approved, waiting for the teacher, or still to do
+// What a stage's reflection looks like right now: accepted, sent back to be rewritten, waiting for
+// the teacher, or not written yet
 function stageState(stage) {
   if (stage.approved) return 'approved'
+  if (stage.rejected) return 'rejected'
   if (stage.reflection) return 'waiting'
   return 'todo'
 }
 
 const stageLabels = {
-  approved: 'Approved',
-  waiting: 'Waiting for approval',
-  todo: 'Ongoing',
+  approved: 'Accepted',
+  rejected: 'Needs rewriting',
+  waiting: 'Waiting for review',
+  todo: 'To write',
 }
 
 // the stage the learner is working on now (the first one not approved yet), or -1 if all are done
@@ -148,12 +151,19 @@ function creditNote(b) {
   }
   if (b.status === 'finished') return 'You earned ' + cost + '.'
   if (b.status === 'cancelled' && b.refunded === false) {
+    if (b.learnerDropped) return 'The student dropped after free cancellation ended, so you got the ' + cost + '.'
     return 'The student cancelled less than 24 hours before the start, so you got the ' + cost + '.'
   }
   if (b.status === 'cancelled') return 'Cancelled by the student. No credits.'
   if (b.status === 'disputed') return cost + ' on hold while the report is looked at.'
-  return 'You earn ' + cost + ' when you both confirm it is finished.'
+  return 'You earn ' + cost + ' when you have accepted every reflection.'
 }
+
+// "Classes I Am Attending": everything except dropped and cancelled classes. A class whose start
+// time the teacher cancelled stays until I pick a new time or drop it (awaitingNewTime).
+const attendingList = computed(() =>
+  store.learning.filter((b) => b.status !== 'cancelled' || b.awaitingNewTime)
+)
 
 // ---------- Classes I host ----------
 function isActive(b) {
@@ -161,9 +171,16 @@ function isActive(b) {
 }
 
 // My students in one course, people still taking it first
+// The Students popup of a class I host: the students taking it now, and the past students who
+// finished it (for them only the chat is offered). Students no longer in the class are not listed.
 function studentsOf(offerId) {
-  const list = store.teaching.filter((b) => b.offerId === offerId)
-  return [...list.filter(isActive), ...list.filter((b) => !isActive(b))]
+  return store.teaching.filter((b) => b.offerId === offerId && isActive(b))
+}
+
+function pastStudentsOf(offerId) {
+  return store.teaching
+    .filter((b) => b.offerId === offerId && b.status === 'finished')
+    .sort((a, b) => ((a.finishedAt || '') < (b.finishedAt || '') ? 1 : -1)) // most recent first
 }
 
 function activeStudentCount(offerId) {
@@ -207,6 +224,8 @@ function upcomingSlots(offer) {
 //   details     - a class I attend: description, stages, buttons
 //   cancel      - "Cancel this class?" (a class I attend)
 //   move        - move a class I attend to another start time of the same course
+//   rebook      - the teacher cancelled my start time: pick another one
+//   drop        - ...or drop the course (I was already refunded)
 //   reflection  - write the reflection for my current stage
 //   students    - the students in a class I host
 //   student     - one student's progress (view and approve reflections)
@@ -340,6 +359,43 @@ async function doMove() {
   if (await store.move(topBooking.value.id, moveSlotId.value)) closeAll()
 }
 
+// ---------- The teacher cancelled my start time ----------
+// I got my credits back. Until I decide (awaitingNewTime, from the server), I can pick another start
+// time of the course (it costs the credits again, on the same booking, so the chat stays), ask the
+// teacher in the chat for another time, or drop the course.
+async function openRebook(b) {
+  moveSlotId.value = ''
+  open({ type: 'rebook', bookingId: b.id })
+  await offersStore.fetchOffers() // fresh seat counts
+}
+
+const rebookChoices = computed(() => {
+  const b = topBooking.value
+  if (!b) return []
+  const offer = offersStore.offers.find((o) => o.id === b.offerId)
+  if (!offer) return []
+  return (offer.slots || []).filter(
+    (slot) => slot.spotsLeft > 0 && !slot.past && slot.startsAt && new Date(slot.startsAt).getTime() > Date.now()
+  )
+})
+
+async function doRebook() {
+  if (moveSlotId.value === '') {
+    formError.value = 'Pick a new start time.'
+    return
+  }
+  formError.value = ''
+  if (await store.rebook(topBooking.value.id, moveSlotId.value)) closeAll()
+}
+
+function openDrop(b) {
+  open({ type: 'drop', bookingId: b.id })
+}
+
+async function doDrop(b) {
+  if (await store.drop(b.id)) closeAll()
+}
+
 async function doConfirm(b) {
   await store.confirm(b.id)
 }
@@ -348,37 +404,39 @@ function openChat(b) {
   router.push('/chat/' + b.id)
 }
 
-// ---------- Reflection ----------
-const reflectionText = ref('')
+// ---------- Reflections (a class I attend) ----------
+// A course is one lesson, so once it has started I write the reflections of ALL the stages and send
+// them together. Accepted ones are locked; ones the teacher sent back must be rewritten.
+const reflectionTexts = ref([])
 
 function openReflection(b) {
-  const index = currentStageIndex(b)
-  reflectionText.value = index >= 0 ? b.stageProgress[index].reflection || '' : ''
+  reflectionTexts.value = (b.stageProgress || []).map((stage) => stage.reflection || '')
   open({ type: 'reflection', bookingId: b.id })
 }
 
-// the stage the reflection popup is about
-const reflectionStage = computed(() => {
-  if (!topBooking.value) return null
-  const index = currentStageIndex(topBooking.value)
-  return index >= 0 ? { index: index, ...topBooking.value.stageProgress[index] } : null
-})
-
 async function submitReflection() {
   const b = topBooking.value
-  const text = reflectionText.value.trim()
-  if (text === '') {
-    formError.value = 'Write your reflection before submitting.'
-    return
-  }
-  if (text.length > 2000) {
-    formError.value = 'Keep your reflection to 2000 characters or fewer.'
-    return
+  const texts = reflectionTexts.value.map((text) => text.trim())
+  for (let i = 0; i < b.stageProgress.length; i++) {
+    const stage = b.stageProgress[i]
+    if (stage.approved) continue
+    if (texts[i] === '') {
+      formError.value = 'Write a reflection for stage ' + (i + 1) + ' (' + stage.stageName + ').'
+      return
+    }
+    if (texts[i].length > 2000) {
+      formError.value = 'Keep the reflection for stage ' + (i + 1) + ' to 2000 characters or fewer.'
+      return
+    }
+    if (stage.rejected && texts[i] === stage.reflection) {
+      formError.value = 'Rewrite stage ' + (i + 1) + ' (' + stage.stageName + ') before sending: ' + b.teacherName + ' sent it back.'
+      return
+    }
   }
   formError.value = ''
-  const ok = await store.submitReflection(b.id, reflectionStage.value.index, text)
+  const ok = await store.sendReflections(b.id, texts)
   if (ok) {
-    toast.show('Reflection sent to ' + b.teacherName + '.')
+    toast.show('Reflections sent to ' + b.teacherName + '.')
     back()
   }
 }
@@ -388,6 +446,7 @@ const openReflections = ref([]) // the stage numbers whose reflection is shown
 
 function openStudent(b) {
   openReflections.value = []
+  rejectingIndex.value = -1
   open({ type: 'student', bookingId: b.id })
 }
 
@@ -401,6 +460,19 @@ function toggleReflection(index) {
 
 async function approve(b, index) {
   await store.approveStage(b.id, index)
+}
+
+// sending a reflection back: a small box for an optional note opens under it first
+const rejectingIndex = ref(-1)
+const rejectNote = ref('')
+
+function startReject(index) {
+  rejectingIndex.value = index
+  rejectNote.value = ''
+}
+
+async function reject(b, index) {
+  if (await store.rejectStage(b.id, index, rejectNote.value.trim())) rejectingIndex.value = -1
 }
 
 // ---------- Removing a student ----------
@@ -550,7 +622,7 @@ async function doCancelSlot() {
     <div class="p-4 mb-4 banner d-flex justify-content-between align-items-center flex-wrap gap-2">
       <div>
         <h1 class="h4 mb-1">My Classes</h1>
-        <p class="mb-0">The classes you attend and the classes you host. A class is finished when both of you confirm it.</p>
+        <p class="mb-0">The classes you attend and the classes you host. A class is finished when the instructor accepts all its reflections.</p>
       </div>
       <div class="text-center">
         <div class="fs-2 fw-bold font-heading">{{ credits }}</div>
@@ -595,18 +667,32 @@ async function doCancelSlot() {
             </template>
           </h2>
 
-          <div v-for="b in store.learning" :key="b.id" class="class-row">
+          <div v-for="b in attendingList" :key="b.id" class="class-row">
             <div class="d-flex justify-content-between align-items-start gap-2">
               <div class="min-w-0">
                 <h3 class="h6 mb-1" :class="{ 'cancelled-title': b.status === 'cancelled' }">{{ b.title }}</h3>
                 <p v-if="isOpen('attending')" class="small text-muted mb-1">Taught by {{ b.teacherName }} &middot; starts {{ formatTime(b.startsAt) }}</p>
               </div>
-              <span v-if="isOpen('attending')" class="status flex-shrink-0" :class="'status-' + b.phase">{{ phaseLabels[b.phase] }}</span>
+              <span v-if="isOpen('attending')" class="status flex-shrink-0" :class="'status-' + (b.awaitingNewTime ? 'upcoming' : b.phase)">{{ b.awaitingNewTime ? 'Needs a new time' : phaseLabels[b.phase] }}</span>
             </div>
 
             <template v-if="isOpen('attending')">
-            <p v-if="b.removedByTeacher && b.startTimeCancelled" class="small text-danger mb-2">
+            <div v-if="b.awaitingNewTime" class="new-time-box mb-2" role="note">
+              <p class="fw-semibold mb-1">{{ b.teacherName }} cancelled your start time</p>
+              <p v-if="b.removalReason" class="small mb-1">Reason: {{ b.removalReason }}</p>
+              <p class="small mb-2">
+                Your {{ creditsText(b.creditCost) }} {{ b.creditCost === 1 ? 'was' : 'were' }} refunded. You can pick another time,
+                ask {{ b.teacherName }} in the chat for one, or drop the course at no cost.
+              </p>
+              <div class="d-flex flex-wrap gap-2">
+                <button type="button" class="btn btn-sm btn-brand" @click="openRebook(b)">Pick a new time</button>
+                <button type="button" class="btn btn-sm btn-outline-dark" @click="openChat(b)">Chat with {{ b.teacherName }}</button>
+                <button type="button" class="btn btn-sm btn-outline-danger" @click="openDrop(b)">Drop course</button>
+              </div>
+            </div>
+            <p v-else-if="b.removedByTeacher && b.startTimeCancelled" class="small text-danger mb-2">
               {{ b.teacherName }} cancelled this start time: {{ b.removalReason }}
+              <template v-if="b.learnerDropped"><br />You dropped the course. Your credits were refunded.</template>
             </p>
             <p v-else-if="b.removedByTeacher" class="small text-danger mb-2">
               {{ b.teacherName }} removed you from this class: {{ b.removalReason }}
@@ -615,14 +701,14 @@ async function doCancelSlot() {
               <div
                 class="progress stage-bar"
                 role="progressbar"
-                :aria-label="'Stages approved in ' + b.title"
+                :aria-label="'Reflections accepted in ' + b.title"
                 :aria-valuenow="approvedCount(b)"
                 aria-valuemin="0"
                 :aria-valuemax="b.totalStageCount"
               >
                 <div class="progress-bar" :style="{ width: (approvedCount(b) / b.totalStageCount) * 100 + '%' }"></div>
               </div>
-              <small class="text-muted">{{ approvedCount(b) }} of {{ b.totalStageCount }} stages approved</small>
+              <small class="text-muted">{{ approvedCount(b) }} of {{ b.totalStageCount }} reflections accepted</small>
             </div>
 
             <div class="d-flex flex-wrap gap-2">
@@ -633,15 +719,18 @@ async function doCancelSlot() {
                 </span>
               </button>
               <button
-                v-if="b.status === 'booked' && currentStageIndex(b) >= 0"
+                v-if="b.canReflect"
                 type="button"
-                class="btn btn-sm btn-brand"
+                class="btn btn-sm btn-brand position-relative"
                 @click="openReflection(b)"
               >
-                Reflection
+                Reflections
+                <span v-if="reflectionsRejected(b) > 0" class="count-alert count-corner">
+                  {{ reflectionsRejected(b) }}<span class="visually-hidden"> reflections to rewrite</span>
+                </span>
               </button>
               <button
-                v-if="b.chatOpen || b.messageCount > 0"
+                v-if="(b.chatOpen || b.messageCount > 0) && !b.awaitingNewTime"
                 type="button"
                 class="btn btn-sm btn-outline-dark position-relative"
                 @click="openChat(b)"
@@ -656,7 +745,7 @@ async function doCancelSlot() {
           </div>
 
           <EmptyState
-            v-if="store.learning.length === 0 && !store.loading && !store.error"
+            v-if="attendingList.length === 0 && !store.loading && !store.error"
             icon="📚"
             title="You have not booked a class yet."
           >
@@ -774,10 +863,11 @@ async function doCancelSlot() {
       </p>
       <p v-else-if="topBooking.movedLate" class="small text-muted mb-2">
         You moved this class less than 24 hours before it started, so it can no longer be cancelled.
-        If you can't come, message {{ topBooking.teacherName }}: they can remove you with a full refund.
+        You can still drop it, but your {{ creditsText(topBooking.creditCost) }} will go to {{ topBooking.teacherName }}.
       </p>
       <p v-else class="small text-muted mb-2">
-        Free cancellation has ended. If you can't come, message {{ topBooking.teacherName }}: they can remove you with a full refund.
+        Free cancellation has ended. You can still drop the course, but your {{ creditsText(topBooking.creditCost) }}
+        will go to {{ topBooking.teacherName }}.
       </p>
       <p v-if="topBooking.canMove" class="small text-muted mb-2">
         You can move it to another start time until {{ formatTime(topBooking.moveBefore) }}
@@ -785,7 +875,10 @@ async function doCancelSlot() {
       </p>
     </template>
     <p v-else-if="topBooking.phase === 'inProgress'" class="small text-muted mb-2">
-      You can mark it finished from {{ formatTime(topBooking.finishAfter) }}.
+      <template v-if="reflectionsRejected(topBooking) > 0">
+        {{ topBooking.teacherName }} sent back {{ reflectionsRejected(topBooking) }} reflection{{ reflectionsRejected(topBooking) === 1 ? '' : 's' }}. Rewrite {{ reflectionsRejected(topBooking) === 1 ? 'it' : 'them' }} under Reflections.
+      </template>
+      <template v-else>Write your reflections under Reflections. The course finishes when {{ topBooking.teacherName }} accepts them all.</template>
     </p>
     <p v-else-if="topBooking.phase === 'readyToFinish' && topBooking.myConfirmed" class="small text-muted mb-2">
       You confirmed. Waiting for {{ topBooking.teacherName }}.
@@ -805,9 +898,10 @@ async function doCancelSlot() {
     </div>
     <div v-if="store.actionError" class="alert alert-danger small mt-2 mb-0" role="alert">{{ store.actionError }}</div>
 
-    <template v-if="topBooking.canCancel || topBooking.canMove || topBooking.canReport || topBooking.canConfirm" #footer>
+    <template v-if="topBooking.canCancel || topBooking.canMove || topBooking.canReport || topBooking.canConfirm || (topBooking.canDrop && !topBooking.awaitingNewTime)" #footer>
       <button v-if="topBooking.canMove" type="button" class="btn btn-sm btn-outline-secondary" @click="openMove(topBooking)">Move to another time</button>
       <button v-if="topBooking.canCancel" type="button" class="btn btn-sm btn-outline-danger" @click="openCancel(topBooking)">Cancel booking</button>
+      <button v-if="topBooking.canDrop && !topBooking.awaitingNewTime" type="button" class="btn btn-sm btn-outline-danger" @click="openDrop(topBooking)">Drop course</button>
       <button v-if="topBooking.canReport" type="button" class="btn btn-sm btn-outline-secondary" @click="showExtraStep('report')">Report a problem</button>
       <button v-if="topBooking.canConfirm" type="button" class="btn btn-sm btn-brand" :disabled="store.busyId === topBooking.id" @click="doConfirm(topBooking)">
         Mark as finished
@@ -884,38 +978,130 @@ async function doCancelSlot() {
     </template>
   </ClassModal>
 
-  <!-- Reflection -->
+  <!-- The teacher cancelled my start time: pick another one -->
   <ClassModal
-    v-else-if="top && top.type === 'reflection' && topBooking"
-    :title="reflectionStage ? reflectionStage.stageName : topBooking.title"
-    :subtitle="reflectionStage ? 'Stage ' + (reflectionStage.index + 1) + ' of ' + topBooking.totalStageCount + ' · ' + topBooking.title : topBooking.title"
+    v-else-if="top && top.type === 'rebook' && topBooking"
+    title="Pick a new time"
+    :subtitle="topBooking.title + ' · with ' + topBooking.teacherName"
     :can-go-back="stack.length > 1"
     @back="back"
     @close="closeAll"
   >
-    <template v-if="reflectionStage">
-      <p v-if="reflectionStage.reflection" class="small text-muted">
-        You sent this one already. {{ topBooking.teacherName }} hasn't approved it yet, so you can still change it.
-      </p>
-      <label for="reflection-text" class="form-label">Reflection</label>
-      <textarea
-        id="reflection-text"
-        v-model="reflectionText"
-        class="form-control"
-        rows="6"
-        maxlength="2000"
-        placeholder="What did you learn in this stage? What was hard?"
-      ></textarea>
-      <small class="text-muted">{{ reflectionText.length }}/2000</small>
-    </template>
-    <p v-else class="mb-0">Every stage is approved. Well done!</p>
+    <p class="small text-muted">
+      Pick another start time of this course. Booking it uses <strong>{{ creditsText(topBooking.creditCost) }}</strong> again
+      (you got them back when {{ topBooking.teacherName }} cancelled). Your chat stays with the class.
+    </p>
+    <LoadingText v-if="offersStore.loading && rebookChoices.length === 0" text="Loading start times..." />
+    <fieldset v-else-if="rebookChoices.length > 0" class="mb-0">
+      <legend class="visually-hidden">New start time</legend>
+      <label v-for="slot in rebookChoices" :key="slot.id" class="move-choice">
+        <input v-model="moveSlotId" type="radio" name="rebook-slot" :value="slot.id" class="form-check-input mt-0" />
+        <span>{{ formatTime(slot.startsAt) }}</span>
+        <small class="text-muted ms-auto">{{ slot.spotsLeft }} seat{{ slot.spotsLeft === 1 ? '' : 's' }} left</small>
+      </label>
+    </fieldset>
+    <div v-else class="mb-0">
+      <p class="mb-2">There is no other start time with a free seat right now.</p>
+      <button type="button" class="btn btn-sm btn-outline-dark" @click="openChat(topBooking)">
+        Ask {{ topBooking.teacherName }} for another time
+      </button>
+    </div>
     <p v-if="formError" class="small text-danger mt-2 mb-0" role="alert">{{ formError }}</p>
     <div v-if="store.actionError" class="alert alert-danger small mt-2 mb-0" role="alert">{{ store.actionError }}</div>
 
     <template #footer>
-      <button type="button" class="btn btn-outline-secondary" @click="closeAll">Cancel</button>
-      <button v-if="reflectionStage" type="button" class="btn btn-brand" :disabled="store.busyId === topBooking.id" @click="submitReflection">
-        Submit
+      <button type="button" class="btn btn-sm btn-outline-secondary" @click="stack.length > 1 ? back() : closeAll()">Not now</button>
+      <button
+        type="button"
+        class="btn btn-sm btn-brand"
+        :disabled="store.busyId === topBooking.id || rebookChoices.length === 0"
+        @click="doRebook"
+      >
+        {{ store.busyId === topBooking.id ? 'Booking...' : 'Book this time' }}
+      </button>
+    </template>
+  </ClassModal>
+
+  <!-- Drop the course: free after the teacher cancelled my start time; otherwise (free cancellation
+       is over) the held credits go to the teacher -->
+  <ClassModal
+    v-else-if="top && top.type === 'drop' && topBooking"
+    title="Drop this course?"
+    :subtitle="topBooking.title + ' · with ' + topBooking.teacherName"
+    :can-go-back="stack.length > 1"
+    @back="back"
+    @close="closeAll"
+  >
+    <template v-if="topBooking.awaitingNewTime">
+      <p class="mb-2">
+        There's nothing to pay: you already got your <strong>{{ creditsText(topBooking.creditCost) }}</strong> back
+        when {{ topBooking.teacherName }} cancelled.
+      </p>
+      <p class="small text-muted mb-0">
+        The class stops waiting for a new time and its chat closes. You can still book the course again later from Courses.
+      </p>
+    </template>
+    <template v-else>
+      <p class="mb-2">
+        Free cancellation has ended, so your <strong>{{ creditsText(topBooking.dropPenalty || topBooking.creditCost) }}</strong>
+        will go to {{ topBooking.teacherName }}. You won't get {{ (topBooking.dropPenalty || topBooking.creditCost) === 1 ? 'it' : 'them' }} back.
+      </p>
+      <p class="small text-muted mb-0">
+        Your seat is freed, the chat closes and the class leaves your list. This can't be undone.
+      </p>
+    </template>
+    <div v-if="store.actionError" class="alert alert-danger small mt-2 mb-0" role="alert">{{ store.actionError }}</div>
+
+    <template #footer>
+      <button type="button" class="btn btn-sm btn-outline-secondary" @click="stack.length > 1 ? back() : closeAll()">Keep it</button>
+      <button type="button" class="btn btn-sm btn-danger" :disabled="store.busyId === topBooking.id" @click="doDrop(topBooking)">
+        {{ store.busyId === topBooking.id ? 'Dropping...' : topBooking.awaitingNewTime ? 'Yes, drop it' : 'Drop and give up credits' }}
+      </button>
+    </template>
+  </ClassModal>
+
+  <!-- Reflections: all the stages of a class I attend -->
+  <ClassModal
+    v-else-if="top && top.type === 'reflection' && topBooking"
+    title="Reflections"
+    :subtitle="topBooking.title + ' · ' + topBooking.totalStageCount + ' stage' + (topBooking.totalStageCount === 1 ? '' : 's')"
+    :can-go-back="stack.length > 1"
+    @back="back"
+    @close="closeAll"
+  >
+    <p class="small text-muted">
+      Write what you learned in each stage, then send them all together. {{ topBooking.teacherName }} accepts or
+      sends back each one. When every reflection is accepted, the course is finished and you get its skill card.
+    </p>
+    <div v-for="(stage, index) in topBooking.stageProgress" :key="index" class="reflection-stage">
+      <div class="d-flex justify-content-between align-items-center gap-2 mb-1">
+        <label :for="'reflection-' + index" class="form-label fw-semibold mb-0">{{ index + 1 }}. {{ stage.stageName }}</label>
+        <span class="stage-pill flex-shrink-0" :class="'stage-' + stageState(stage)">{{ stageLabels[stageState(stage)] }}</span>
+      </div>
+      <p v-if="stage.approved" class="small mb-0 locked-reflection">{{ stage.reflection }}</p>
+      <template v-else>
+        <p v-if="stage.rejected" class="alert alert-warning small py-2 mb-2" role="note">
+          {{ topBooking.teacherName }} sent this back. Please rewrite it.
+          <span v-if="stage.rejectNote" class="d-block mt-1">Their note: "{{ stage.rejectNote }}"</span>
+        </p>
+        <textarea
+          :id="'reflection-' + index"
+          v-model="reflectionTexts[index]"
+          class="form-control"
+          rows="4"
+          maxlength="2000"
+          :placeholder="'What did you learn in ' + stage.stageName + '? What was hard?'"
+        ></textarea>
+        <small class="text-muted">{{ (reflectionTexts[index] || '').length }}/2000</small>
+      </template>
+    </div>
+    <p v-if="formError" class="small text-danger mt-2 mb-0" role="alert">{{ formError }}</p>
+    <div v-if="store.actionError" class="alert alert-danger small mt-2 mb-0" role="alert">{{ store.actionError }}</div>
+
+    <template #footer>
+      <button type="button" class="btn btn-outline-secondary" @click="stack.length > 1 ? back() : closeAll()">Cancel</button>
+      <button type="button" class="btn btn-brand" :disabled="store.busyId === topBooking.id" @click="submitReflection">
+        {{ store.busyId === topBooking.id ? 'Sending...' : 'Send reflections' }}
       </button>
     </template>
   </ClassModal>
@@ -945,7 +1131,29 @@ async function doCancelSlot() {
         {{ studentActionCount(b) }}<span class="visually-hidden"> reflections or messages waiting for you</span>
       </span>
     </button>
-    <EmptyState v-if="studentsOf(topOffer.id).length === 0" icon="🪑" title="Nobody has booked this class yet." />
+    <EmptyState
+      v-if="studentsOf(topOffer.id).length === 0 && pastStudentsOf(topOffer.id).length === 0"
+      icon="🪑"
+      title="Nobody has booked this class yet."
+    />
+    <p v-else-if="studentsOf(topOffer.id).length === 0" class="small text-muted mb-0">No current students.</p>
+
+    <!-- past students: finished the course; only the chat (with all its old messages) is offered -->
+    <template v-if="pastStudentsOf(topOffer.id).length > 0">
+      <h3 class="h6 mt-3 mb-2">Past students</h3>
+      <div v-for="b in pastStudentsOf(topOffer.id)" :key="b.id" class="student-row past-student">
+        <span class="min-w-0">
+          <strong class="d-block text-truncate">{{ b.learnerName }}</strong>
+          <small class="text-muted">Completed{{ b.finishedAt ? ' ' + formatTime(b.finishedAt) : '' }}</small>
+        </span>
+        <button type="button" class="btn btn-sm btn-outline-dark position-relative flex-shrink-0" @click="openChat(b)">
+          Chat
+          <span v-if="unreadOf(b) > 0" class="count-alert count-corner">
+            {{ unreadOf(b) }}<span class="visually-hidden"> unread messages</span>
+          </span>
+        </button>
+      </div>
+    </template>
   </ClassModal>
 
   <!-- One student's progress -->
@@ -963,36 +1171,50 @@ async function doCancelSlot() {
     <template v-if="topBooking.totalStageCount > 0">
       <h3 class="h6">Progress</h3>
       <div v-for="(stage, index) in topBooking.stageProgress" :key="index" class="progress-row">
-        <div class="d-flex justify-content-between align-items-center gap-2">
-          <span class="min-w-0 text-truncate">{{ index + 1 }}. {{ stage.stageName }}</span>
-          <button
-            v-if="stage.reflection"
-            type="button"
-            class="btn btn-sm btn-link p-0 flex-shrink-0"
-            :aria-expanded="openReflections.includes(index) ? 'true' : 'false'"
-            @click="toggleReflection(index)"
-          >
-            {{ openReflections.includes(index) ? 'Hide reflection' : 'View reflection' }}
-            <span v-if="!stage.approved" class="review-badge ms-1">!</span>
-          </button>
-          <span v-else class="stage-pill stage-todo flex-shrink-0">Ongoing</span>
+        <div class="d-flex flex-wrap justify-content-between align-items-center gap-2">
+          <span class="min-w-0 flex-grow-1">{{ index + 1 }}. {{ stage.stageName }}</span>
+          <span class="d-flex align-items-center gap-2 flex-shrink-0">
+            <span class="stage-pill" :class="'stage-' + stageState(stage)">{{ stageLabels[stageState(stage)] }}</span>
+            <button
+              v-if="stage.reflection"
+              type="button"
+              class="btn btn-sm btn-outline-secondary reflection-button"
+              :aria-expanded="openReflections.includes(index) ? 'true' : 'false'"
+              @click="toggleReflection(index)"
+            >
+              {{ openReflections.includes(index) ? 'Hide' : 'Read' }}
+              <span v-if="stageState(stage) === 'waiting'" class="review-badge ms-1">!</span>
+            </button>
+          </span>
         </div>
         <div v-if="openReflections.includes(index)" class="reflection-box mt-2">
           <p class="mb-2">{{ stage.reflection }}</p>
-          <span v-if="stage.approved" class="stage-pill stage-approved">Approved</span>
-          <button
-            v-else-if="topBooking.status === 'booked'"
-            type="button"
-            class="btn btn-sm btn-brand"
-            :disabled="store.busyId === topBooking.id"
-            @click="approve(topBooking, index)"
-          >
-            Approve this stage
-          </button>
+          <p v-if="stage.rejected" class="small text-muted mb-0">
+            You sent this back<template v-if="stage.rejectNote">: "{{ stage.rejectNote }}"</template>. Waiting for
+            {{ topBooking.learnerName }} to rewrite it.
+          </p>
+          <template v-else-if="!stage.approved && topBooking.status === 'booked'">
+            <div v-if="rejectingIndex === index" class="mb-2">
+              <label :for="'reject-note-' + index" class="form-label small mb-1">What should they change? (optional)</label>
+              <textarea :id="'reject-note-' + index" v-model="rejectNote" class="form-control form-control-sm mb-2" rows="2" maxlength="300"></textarea>
+              <div class="d-flex flex-wrap gap-2">
+                <button type="button" class="btn btn-sm btn-danger" :disabled="store.busyId === topBooking.id" @click="reject(topBooking, index)">
+                  Send back
+                </button>
+                <button type="button" class="btn btn-sm btn-outline-secondary" @click="rejectingIndex = -1">Never mind</button>
+              </div>
+            </div>
+            <div v-else class="d-flex flex-wrap gap-2">
+              <button type="button" class="btn btn-sm btn-brand" :disabled="store.busyId === topBooking.id" @click="approve(topBooking, index)">
+                Accept
+              </button>
+              <button type="button" class="btn btn-sm btn-outline-danger" @click="startReject(index)">Reject</button>
+            </div>
+          </template>
         </div>
       </div>
-      <p v-if="topBooking.stageNames.length < topBooking.totalStageCount" class="small text-muted mt-2 mb-0">
-        The next stage opens after you approve this one.
+      <p v-if="topBooking.status === 'booked'" class="small text-muted mt-2 mb-0">
+        The course is finished when you have accepted every reflection.
       </p>
     </template>
     <div v-if="store.actionError" class="alert alert-danger small mt-2 mb-0" role="alert">{{ store.actionError }}</div>
@@ -1277,6 +1499,15 @@ async function doCancelSlot() {
 }
 
 /* a class I cancelled (or was removed from): its title in a lighter grey */
+/* the teacher cancelled my start time: what I can do next */
+.new-time-box {
+  background: #fdf6e3;
+  border-left: 4px solid #c9a227;
+  border-radius: 0.5rem;
+  padding: 0.75rem 0.9rem;
+  color: #4a3b1f;
+}
+
 .cancelled-title {
   color: #a39a8e;
 }
@@ -1338,6 +1569,27 @@ async function doCancelSlot() {
 .stage-waiting {
   background: #fbe7a8;
   color: #6b5200;
+}
+
+.stage-rejected {
+  background: #fde8e6;
+  color: #a12b1f;
+}
+
+/* one stage in the student's Reflections popup */
+.reflection-stage {
+  padding: 12px 0;
+  border-top: 1px solid var(--k-border);
+}
+
+.reflection-stage:first-of-type {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.locked-reflection {
+  white-space: pre-wrap;
+  color: var(--k-muted);
 }
 
 .stage-todo {

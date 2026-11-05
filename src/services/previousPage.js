@@ -9,6 +9,7 @@ const pageNames = {
   '/profile': 'Profile',
   '/classes': 'My Classes',
   '/courses': 'Courses',
+  '/reports': 'Reports',
 }
 
 export function usePreviousPage(fallback) {
