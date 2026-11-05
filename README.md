@@ -23,10 +23,12 @@ Admin
     3. Click on "View" button to view a particular user profile in admin view
       In user profile, admin can review users details, take actions, warning history and report history.
       Admin can view the profile of the reporter in admin mode by clicking the reporter's name from the user profile
-      3ai. If user is active, click on "Ban User" to ban a user, it will prompt a confirmation alert to confirm a ban,
-      when "OK" is clicked, it will ban the user
+      <br>
+      3ai. If user is active, click on "Ban User" to ban a user, it will prompt a confirmation alert to confirm a ban, when "OK" is clicked, it will ban the user
+      <br>
       3aii. If user is banned, click on "Unban User" to unban user, it will prompt a confirmation alert to confirm an unban
       when "OK" is clicked, it will unban the user
+      <br>
       3b. Admin can send out warnings to users after admin reviewed their activities without banning them
 
     4. Click on "Disputes" to review reports
@@ -34,7 +36,9 @@ Admin
     5. Click on "Message reports" to see the decisions made and what is handled recently
 
    - Others: 
+      <br>
       There is no way of creating an admin account from the frontend (Hi prof, if you need more accounts, can ask us to create more)
+      <br>
       Admin will be logged out if they exit the tab and they have to log in again if they want to use another tab
 
 
