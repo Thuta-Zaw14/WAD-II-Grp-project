@@ -30,14 +30,6 @@ const formattedDate = computed(() => {
   })
 })
 
-// the instructor's final grade from the Progress page (see services/progressRules.js)
-const MASTERY = {
-  practising: { icon: '🌿', label: 'Practising' },
-  proficient: { icon: '🌳', label: 'Proficient' },
-  mastered: { icon: '🏆', label: 'Mastered' },
-}
-const mastery = computed(() => MASTERY[props.skill.masteryLevel] || null)
-
 const initials = computed(() => {
   return (props.skill.issuer || '?')
     .trim()
@@ -64,16 +56,6 @@ const initials = computed(() => {
       <h3 class="achievement-title">
         {{ skill.name }}
       </h3>
-
-      <span
-        v-if="mastery"
-        class="mastery-badge"
-        :class="'mastery-' + skill.masteryLevel"
-        :title="skill.masterySummary || ''"
-        data-testid="mastery-badge"
-      >
-        {{ mastery.icon }} {{ mastery.label }}
-      </span>
 
       <p class="achievement-description">
         Successfully completed this learning experience.
@@ -134,19 +116,6 @@ const initials = computed(() => {
 </template>
 
 <style scoped>
-.mastery-badge {
-  display: inline-block;
-  margin-bottom: 10px;
-  padding: 3px 12px;
-  border-radius: 999px;
-  font-size: 12px;
-  font-weight: 700;
-}
-
-.mastery-practising { background: #e6efe0; color: #3f6a35; }
-.mastery-proficient { background: #d5e8d9; color: #2f5d3d; }
-.mastery-mastered { background: #fbe7a8; color: #6b5200; }
-
 .achievement-card {
   display: flex;
   flex-direction: column;

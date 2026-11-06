@@ -206,13 +206,6 @@ h1, h2, h3, h4, h5, h6,
 .status-cancelled { background: #e8e4dc; color: #5f584d; }
 .status-disputed { background: #f6d5d5; color: #8a1f1f; }
 
-/* the state of a piece of homework on the Progress page (services/progressRules.js STATUS_INFO) */
-.tone-neutral { background: var(--k-surface-alt); color: var(--k-muted); }
-.tone-info { background: var(--k-brand-soft); color: #6b4423; }
-.tone-warning { background: #fbe7a8; color: #6b5200; }
-.tone-success { background: #dcebdf; color: #2f5d3d; }
-.tone-danger { background: #f6d5d5; color: #8a1f1f; }
-
 /* The background of every page: a cool light brown fading into a darker brown, with the logo's
    two overlapping circles repeated faintly over it. It is fixed behind the whole window, so it
    stays put while the page scrolls (the nav bar and the cards have their own backgrounds). */
